@@ -92,9 +92,9 @@ private denylist from reaching it.
   message, `pre-push` scans the full history.
 - CI needs a repository secret named `DENYLIST` holding the terms; the
   `leak-guard` job fails when it is missing or empty. It scans the tree, the
-  history, commit messages and author identities, the pull request title
-  and body, and runs
-  `gitleaks` on the full history.
+  history, commit messages, author identities, branch and tag names, annotated
+  tag messages, the pull request title and body, and runs `gitleaks` on the
+  full history.
 
 Run it by hand:
 

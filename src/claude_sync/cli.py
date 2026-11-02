@@ -55,9 +55,12 @@ def main(argv: list[str] | None = None) -> int:
     except ClaudeSyncError as e:
         _report(e)
         return int(ExitCode.ERROR)
+    except Exception:
+        _report("internal error, rerun with CLAUDE_SYNC_DEBUG=1 for details")
+        return int(ExitCode.ERROR)
 
 
-def _report(error: ClaudeSyncError) -> None:
+def _report(error: ClaudeSyncError | str) -> None:
     if os.environ.get("CLAUDE_SYNC_DEBUG") == "1":
         traceback.print_exc()
     print(f"claude-sync: error: {error}", file=sys.stderr)

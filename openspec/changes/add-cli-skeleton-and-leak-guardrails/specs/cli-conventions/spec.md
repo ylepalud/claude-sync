@@ -33,6 +33,10 @@ with `claude-sync: error:`.
 - **WHEN** the user runs `claude-sync` with no argument
 - **THEN** the top-level help is printed and the exit code is 0
 
+#### Scenario: Unexpected internal error
+- **WHEN** a command fails with an error that is not a known claude-sync error
+- **THEN** standard error shows `claude-sync: error: internal error, rerun with CLAUDE_SYNC_DEBUG=1 for details`, no traceback, and the exit code is 1
+
 #### Scenario: Unknown command
 - **WHEN** the user runs `claude-sync does-not-exist`
 - **THEN** a usage error is printed on standard error and the exit code is 2

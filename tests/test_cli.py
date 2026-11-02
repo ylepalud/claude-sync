@@ -91,3 +91,40 @@ def test_help_rejects_json(capsys):
     code, _, err = run(capsys, "help", "--json")
     assert code == 2
     assert "usage: claude-sync" in err and "--json" in err
+
+
+def _install_failing_command(monkeypatch):
+    def boom(args, ctx):
+        raise RuntimeError("secret detail")
+
+    fake = registry.Command(
+        name="boom",
+        summary="fails",
+        description="fails",
+        examples=[],
+        exit_codes=[],
+        kind="doc",
+        configure=lambda parser: None,
+        run=boom,
+    )
+    monkeypatch.setattr(registry, "COMMANDS", [*registry.COMMANDS, fake])
+
+
+def test_unexpected_exception_prints_a_fixed_message_and_exits_1(capsys, monkeypatch):
+    monkeypatch.delenv("CLAUDE_SYNC_DEBUG", raising=False)
+    _install_failing_command(monkeypatch)
+    code, _, err = run(capsys, "boom")
+    assert code == 1
+    assert err == (
+        "claude-sync: error: internal error, rerun with CLAUDE_SYNC_DEBUG=1 for details\n"
+    )
+    assert "Traceback" not in err and "secret detail" not in err
+
+
+def test_unexpected_exception_shows_the_traceback_in_debug_mode(capsys, monkeypatch):
+    monkeypatch.setenv("CLAUDE_SYNC_DEBUG", "1")
+    _install_failing_command(monkeypatch)
+    code, _, err = run(capsys, "boom")
+    assert code == 1
+    assert "Traceback" in err
+    assert "claude-sync: error: internal error" in err

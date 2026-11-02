@@ -12,7 +12,8 @@ when set, otherwise from `~/.config/claude-sync/denylist.txt`, one term per
 line, ignoring blank lines and lines starting with `#`, matching
 case-insensitively. When no source exists or it holds no term, the scanner
 SHALL fail with exit code 3 instead of reporting success. Findings exit with
-code 1 and a clean scan with code 0. The scanner SHALL refuse to run when a
+code 1, a clean scan with code 0, and an internal failure of the scanner with
+code 5. The scanner SHALL refuse to run when a
 tracked file is named `denylist.txt`.
 
 #### Scenario: Empty denylist
@@ -49,7 +50,8 @@ echo file content or git output.
 The scanner SHALL be able to scan, each selected by an option: tracked files
 of the working tree including their paths, staged content, every added line,
 path, commit message and author or committer identity reachable in the
-history (merge commits included), a commit message file, and a
+history (merge commits included), every branch and tag name, and every annotated
+tag message, a commit message file, and a
 free text passed on standard input labelled by the caller (used for PR title
 and body).
 
@@ -60,6 +62,18 @@ and body).
 #### Scenario: Leak in staged content
 - **WHEN** a staged change adds a line containing a term
 - **THEN** the pre-commit hook rejects the commit
+
+#### Scenario: Leak in a ref name
+- **WHEN** a branch or tag name contains a term
+- **THEN** a history scan reports `ref #<k>` without printing the name and exits with a non-zero code
+
+#### Scenario: Leak in an annotated tag message
+- **WHEN** an annotated tag message contains a term
+- **THEN** a history scan reports `ref #<k>: tag message` and exits with a non-zero code
+
+#### Scenario: Symlink pointing outside the repository
+- **WHEN** a tracked symlink points to a file outside the repository
+- **THEN** the tree scan checks the link target path as text and never reads the file it points to
 
 #### Scenario: Leak in a commit identity
 - **WHEN** a commit's author e-mail contains a term

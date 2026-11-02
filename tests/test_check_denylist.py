@@ -273,8 +273,57 @@ def test_history_scans_author_and_committer_identities(repo):
     assert "acme" not in output(result).lower()
 
 
+def ref_position(repo, refname: str) -> int:
+    refs = repo.git("for-each-ref", "--format=%(refname)").splitlines()
+    return refs.index(refname) + 1
+
+
+def test_history_reports_a_ref_name_by_position_without_the_name(repo):
+    repo.git("branch", "feat/globex-thing")
+    k = ref_position(repo, "refs/heads/feat/globex-thing")
+    result = repo.scan("--history")
+    assert result.returncode == 1
+    assert f"ref #{k}: term #2" in result.stdout
+    assert "globex" not in output(result).lower()
+
+
+def test_history_reports_an_annotated_tag_message(repo):
+    repo.git("tag", "-a", "v1", "-m", "for Acme")
+    k = ref_position(repo, "refs/tags/v1")
+    result = repo.scan("--history")
+    assert result.returncode == 1
+    assert f"ref #{k}: tag message: term #1" in result.stdout
+    assert "acme" not in output(result).lower()
+
+
+def test_branches_and_lightweight_tags_report_no_tag_message(repo):
+    repo.write("a.txt", "clean\n")
+    repo.commit("feat: work for Acme")
+    repo.git("tag", "v1")
+    result = repo.scan("--history")
+    assert "message: term #1" in result.stdout
+    assert "tag message" not in result.stdout
+
+
 def test_history_of_a_clean_repo_exits_zero(repo):
     assert repo.scan("--history").returncode == 0
+
+
+def test_tree_scans_a_symlink_target_path_not_the_pointed_file(repo):
+    outside = repo.root.parent / "outside.txt"
+    outside.write_text("acme\n")
+    (repo.root / "link.txt").symlink_to(outside)
+    repo.commit()
+    assert repo.scan("--tree").returncode == 0
+
+
+def test_tree_reports_a_term_in_a_symlink_target_path(repo):
+    (repo.root / "link.txt").symlink_to("/somewhere/globex/file.txt")
+    repo.commit()
+    result = repo.scan("--tree")
+    assert result.returncode == 1
+    assert "link.txt:1: term #2" in result.stdout
+    assert "globex" not in output(result).lower()
 
 
 def test_message_file_is_reported_as_message(repo):
@@ -336,7 +385,7 @@ def test_unexpected_failure_prints_a_fixed_message_without_git_output(tmp_path, 
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 1
+    assert result.returncode == 5
     assert "Traceback" not in output(result)
     assert "fatal" not in output(result)
     assert "scan failed" in output(result)

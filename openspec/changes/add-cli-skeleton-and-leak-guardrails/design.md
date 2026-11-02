@@ -92,7 +92,9 @@ future command cannot ship an incomplete help.
 `ExitCode` IntEnum in `src/claude_sync/exit_codes.py`: `OK=0`, `ERROR=1`,
 `USAGE=2`, `CONFIRMATION_REQUIRED=3`, `DRIFT=4`. argparse already exits with
 2 on usage errors. An uncaught `ClaudeSyncError` maps to 1 with the
-`claude-sync: error:` prefix; tracebacks only with `CLAUDE_SYNC_DEBUG=1`.
+`claude-sync: error:` prefix; any other exception also maps to 1 with the
+fixed message `internal error, rerun with CLAUDE_SYNC_DEBUG=1 for details`;
+tracebacks only with `CLAUDE_SYNC_DEBUG=1`.
 
 ### Confirmation
 `ctx.confirm(question) -> bool`: returns True with `--yes`; prompts when
@@ -125,8 +127,15 @@ and a hidden test-only command is not added.
   back to a missing file), else `~/.config/claude-sync/denylist.txt`. Empty
   or missing: exit 3 with `denylist is empty or missing` (2 stays argparse's
   usage error). Findings: exit 1. Clean: 0.
+- Ref names and tag messages: `--history` also scans
+  `git for-each-ref --format=%(refname)%00%(objecttype)%00%(contents)%00` over every ref:
+  the name is reported as `ref #<k>` (position in that list, never the
+  name), an annotated tag's message (objecttype `tag` only) as `ref #<k>: tag message`.
+- Symlinks: `--tree` reads a tracked symlink with `os.readlink` and scans the
+  target path as text (location `<path>:1`), never the pointed-to file.
 - Error hygiene: git's stderr is captured and never echoed; uncaught
-  exceptions print a fixed message and exit 1 without a traceback, so no
+  exceptions print a fixed message and exit 5 (distinct from findings, 1)
+  without a traceback, so no
   error path can print file content.
 - Output: `<location>: term #<n>`; never the term or the line. Rejected:
   printing the line, which would publish the denylist in CI logs.
@@ -177,8 +186,8 @@ only `base^..head`, not the full history.
   single-maintainer repo; fail closed is the point.
 - Scanning every blob of the history grows with the repo → fine at this
   size; revisit if the job exceeds a minute.
-- Branch names, tags and PR comments are not scanned → known gap; branch
-  names follow `<type>/<change-name>` and are reviewed when created.
+- PR comments are not scanned → known gap; they are written by hand on a
+  single-maintainer repo.
 - The dry-run scenario of `cli-conventions` has no command to exercise it
   yet → deferred to step 3, which brings the first mutating command; this
   change only builds and unit-tests `Context`.
