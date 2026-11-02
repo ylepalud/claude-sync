@@ -72,6 +72,7 @@ def test_registry_order_is_stable():
         "map",
         "unmap",
         "set-default",
+        "shell-init",
     ]
 
 
