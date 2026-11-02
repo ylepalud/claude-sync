@@ -20,4 +20,4 @@
 
 ## 4. Documentation
 
-- [ ] 4.1 README: a "Manifest" section (neutral example, `import`, `status`, `apply`, `profile create`, what a `ref` can be and that upstream movement is drift you accept with `import`, the account guide and the organization check, that the profile repo tracks only `profile.toml` because `settings.json` can hold tokens), and the roadmap with steps 3 and 4 swapped (step 3 done: manifest and apply; step 4: init/uninstall with backup and migration; step 5 unchanged).
+- [x] 4.1 README: a "Manifest" section (neutral example, `import`, `status`, `apply`, `profile create`, what a `ref` can be and that upstream movement is drift you accept with `import`, the account guide and the organization check, that the profile repo tracks only `profile.toml` because `settings.json` can hold tokens), and the roadmap with steps 3 and 4 swapped (step 3 done: manifest and apply; step 4: init/uninstall with backup and migration; step 5 unchanged).

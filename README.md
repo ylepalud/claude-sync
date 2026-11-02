@@ -9,8 +9,9 @@ plugins, MCP servers, history and login. A declarative `profile.toml` in each
 profile records what is installed, at which version.
 
 Status: under construction. The CLI frame, the leak guard, profile
-resolution and the zsh integration exist today. Profile directories are not
-created yet (`init` comes in step 3); see the roadmap below and
+resolution, the zsh integration, `profile create` and the manifest commands
+(`import`, `status`, `apply`) exist today. Moving an existing `~/.claude`
+into a profile (`init`) comes in step 4; see the roadmap below and
 `openspec/changes/` for the planned work.
 
 ## Install
@@ -124,9 +125,9 @@ process. On start and after every `cd` it:
 
 - exports `CLAUDE_SYNC_PROFILE` with the resolved profile;
 - exports `CLAUDE_CONFIG_DIR` as the profile directory, `profiles/<profile>/`
-  next to the configuration file, only when that directory exists. Step 3
-  (`init`) creates the profile directories; until then a `CLAUDE_CONFIG_DIR`
-  you set yourself is kept;
+  next to the configuration file, only when that directory exists
+  (`claude-sync profile create`, see below); until then a
+  `CLAUDE_CONFIG_DIR` you set yourself is kept;
 - shows `claude:<profile>` at the start of `RPROMPT`, with a `?` when the
   profile directory does not exist yet (`claude:work?`). Set
   `CLAUDE_SYNC_PROMPT=0` before the `eval` line to turn the segment off.
@@ -142,6 +143,107 @@ claude-sync-reload       # apply configuration changes to this shell
 `claude-sync-use` exports `CLAUDE_SYNC_OVERRIDE`, which `claude-sync which`
 honours too. Open shells keep the mappings they were started with until
 `claude-sync-reload`. Only zsh is supported.
+
+## Manifest
+
+Each profile declares its marketplaces and user-scope plugins in
+`profile.toml`, at the root of the profile directory:
+
+```toml
+[[marketplace]]
+name = "example-tools"
+source = "github:example/claude-plugins"
+ref = "v1.2"
+commit = "0123456789abcdef0123456789abcdef01234567"
+
+[[marketplace]]
+name = "local-tools"
+source = "path:~/Dev/claude-plugins"
+
+[[plugin]]
+id = "formatter@example-tools"
+version = "1.2.0"
+enabled = true
+
+[[plugin]]
+id = "notes@local-tools"
+version = "0.3.1"
+enabled = false
+
+[account]
+org_uuid = "00000000-0000-0000-0000-000000000000"
+```
+
+- `source` is `github:<owner>/<repo>`, `git:<url>`, `url:<url>` or
+  `path:<dir>`. Marketplaces with a file or claude.ai source are not managed:
+  `import` skips them with a warning, `status` lists them as information and
+  `apply` never touches them.
+- `ref` is a branch or a tag, passed to `claude plugin marketplace add` as
+  `<source>#<ref>`. It cannot be a commit: the CLI fails to clone one.
+- `commit` and `version` record what was installed when you imported. The
+  CLI cannot install a given commit or plugin version, so they are checks,
+  not pins: when the upstream moves, `status` reports drift and you accept
+  it by running `import` again.
+- A `path` source has neither `ref` nor `commit`.
+- A plugin id is `<plugin>@<marketplace>`, and the marketplace must be
+  declared. Unknown keys, missing fields and duplicates are errors that name
+  the file.
+
+Create a profile, then fill its manifest from an existing configuration:
+
+```sh
+claude-sync profile create perso
+claude-sync profile create work --org-uuid 00000000-0000-0000-0000-000000000000
+claude-sync import --source ~/.claude --output -   # print, write nothing
+claude-sync import --source ~/.claude --profile perso
+```
+
+`profile create` makes `profiles/<name>/` next to the configuration file
+(mode 700) with a `profile.toml` that is empty, or holds only `[account]`
+with `--org-uuid`, and a git repository whose `.gitignore` lets through only
+`profile.toml` and itself: the rest of the profile, `settings.json` included,
+can hold tokens (in `env`, for example) and stays out of Git. No commit is
+made. An existing profile is an error.
+
+`import` reads the plugins and marketplaces through the `claude` CLI. Without
+`--source` it reads the target profile; without `--output` it writes that
+profile's `profile.toml`. The target profile is `--profile NAME`, else the
+profile of the current directory, and its directory must exist. An
+`[account]` table already in the written file is kept; overwriting the file
+asks for a confirmation.
+
+Compare and converge:
+
+```sh
+claude-sync status --profile work           # exit 4 on drift
+claude-sync apply --profile work --dry-run  # print the claude commands
+claude-sync apply --profile work
+claude-sync apply --profile work --prune    # also remove what is not listed
+```
+
+`status` lists every difference: a missing or unlisted marketplace or plugin,
+another source, ref, commit, version or enabled state, the account keys
+below, and the signed-in organization. A marketplace without a recorded
+`commit`, and an unmanaged one, are information, not drift.
+
+`apply` adds missing marketplaces, installs missing plugins and enables or
+disables plugins to match. A marketplace installed with another source or
+ref is removed and added again, and its plugins reinstalled. Removing a
+marketplace uninstalls its plugins and deletes their data, so those steps,
+and everything `--prune` removes, are listed in one confirmation first.
+`apply` never approves a marketplace-declared command for you: it stops and
+shows the CLI message. When a version or commit still differs afterwards,
+the upstream moved: `apply` says so and exits 4, and `import` accepts it.
+
+### Account
+
+With an `[account]` table, `apply` writes `forceLoginMethod = "claudeai"` and
+`forceLoginOrgUUID = ["<org_uuid>"]` to the profile's `settings.json`. Outside
+managed settings these keys only guide the login screen; they do not stop a
+sign-in to another organization. `status` is the check: it reports drift when
+the keys are absent or different, and when the signed-in organization
+(`oauthAccount.organizationUuid` in the profile's `.claude.json`) is not
+`org_uuid`. Before the first sign-in there is nothing to compare.
 
 ## Development
 
@@ -190,8 +292,9 @@ scripts/check-denylist --tree --history
 
 1. [x] CLI skeleton and leak guard.
 2. [x] `shell-init` and profile resolution.
-3. [ ] `init` / `uninstall` with backup and migration.
-4. [ ] `import` / `status` / `apply` for plugins and marketplaces.
+3. [x] Manifest: `profile create`, `import` / `status` / `apply` for plugins
+   and marketplaces.
+4. [ ] `init` / `uninstall` with backup and migration.
 5. [ ] Skills, MCP, settings, machine `[tools]`.
 
 ## License
