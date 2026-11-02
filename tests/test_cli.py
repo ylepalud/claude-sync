@@ -63,7 +63,16 @@ def test_help_all_is_in_registry_order(capsys):
 
 
 def test_registry_order_is_stable():
-    assert [c.name for c in registry.COMMANDS] == ["version", "help"]
+    assert [c.name for c in registry.COMMANDS] == [
+        "version",
+        "help",
+        "which",
+        "list",
+        "config",
+        "map",
+        "unmap",
+        "set-default",
+    ]
 
 
 def test_help_all_separates_blocks_with_a_rule_line(capsys):

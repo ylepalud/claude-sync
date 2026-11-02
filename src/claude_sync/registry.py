@@ -12,7 +12,7 @@ from claude_sync.exit_codes import ExitCode
 if TYPE_CHECKING:
     from claude_sync.context import Context
 
-COMMAND_MODULES = ("version", "help")
+COMMAND_MODULES = ("version", "help", "which", "list", "config", "map", "unmap", "set_default")
 
 
 @dataclass(frozen=True)
