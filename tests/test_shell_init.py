@@ -32,3 +32,14 @@ def test_snippet_registers_the_chpwd_hook(capsys):
     code, out, _ = run(capsys, "shell-init", "zsh")
     assert code == 0
     assert "add-zsh-hook chpwd _claude_sync_apply" in out
+
+
+def test_every_snippet_function_using_regex_matching_pins_the_locale():
+    from claude_sync import zsh
+
+    bodies = zsh.FUNCTIONS.split("\n}\n")
+    using = [b for b in bodies if "=~" in b]
+    assert using, "expected snippet functions that use =~"
+    for body in using:
+        assert "local LC_ALL=C" in body, body.strip().splitlines()[0]
+        assert body.index("local LC_ALL=C") < body.index("=~")

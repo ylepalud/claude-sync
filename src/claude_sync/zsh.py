@@ -16,6 +16,7 @@ _claude_sync_resolve() {
 
 _claude_sync_apply() {
   emulate -L zsh; setopt case_match  # whatever options the caller set
+  local LC_ALL=C  # ASCII ranges in =~, whatever the locale
   local REPLY
   if (( ! ${+CLAUDE_SYNC_OVERRIDE} )); then
     _claude_sync_resolve
@@ -49,6 +50,7 @@ _claude_sync_apply() {
 
 claude-sync-use() {
   emulate -L zsh; setopt case_match  # whatever options the caller set
+  local LC_ALL=C  # ASCII ranges in =~, whatever the locale
   if [[ $1 == --auto ]]; then
     unset CLAUDE_SYNC_OVERRIDE
   elif [[ $1 =~ $_claude_sync_name_re ]]; then
@@ -95,7 +97,7 @@ def render(config: Config) -> str:
     # hit is the longest match (applying matches are a chain of ancestors).
     # The sort is stable, so equal paths keep the config order, as in resolve().
     matches = sorted(
-        ((str(paths.normalize(m.path)), m.profile) for m in config.matches),
+        ((str(paths.key(m.path)), m.profile) for m in config.matches),
         key=lambda pair: -len(pair[0]),
     )
     words = " ".join(f"{quote(path)} {quote(profile)}" for path, profile in matches)

@@ -59,6 +59,7 @@ def _parse(data: dict, file: Path) -> Config:
     if not isinstance(tables, list):
         raise fail("'match' must be an array of tables")
     matches = []
+    seen: dict[Path, str] = {}
     for table in tables:
         if not isinstance(table, dict):
             raise fail("'match' must be an array of tables")
@@ -71,6 +72,12 @@ def _parse(data: dict, file: Path) -> Config:
         path = table["path"]
         if not isinstance(path, str) or not path:
             raise fail("match path must be a non-empty string")
+        normalized = paths.key(path)
+        if normalized == Path("/"):
+            raise fail(f"match path {path!r} maps the root directory")
+        if normalized in seen:
+            raise fail(f"match path {path!r} duplicates {seen[normalized]!r}")
+        seen[normalized] = path
         matches.append(Match(path, _profile(table["profile"], fail, "match profile")))
     return Config(default, tuple(matches))
 

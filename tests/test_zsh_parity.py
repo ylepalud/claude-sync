@@ -314,3 +314,30 @@ def test_reload_fails_and_changes_nothing_when_the_config_is_invalid(tmp_path):
     )
     assert result.stdout.splitlines() == ["1", "work perso"]
     assert "invalid profile name 'Bad!'" in result.stderr
+
+
+def _utf8_locale():
+    available = subprocess.run(["locale", "-a"], capture_output=True, text=True, check=False)
+    names = available.stdout.split()
+    return next((n for n in ("en_US.UTF-8", "C.UTF-8") if n in names), None)
+
+
+def test_names_are_checked_with_ascii_semantics_under_a_utf8_locale(tmp_path):
+    locale = _utf8_locale()
+    if locale is None:
+        pytest.skip("no UTF-8 locale (en_US.UTF-8 or C.UTF-8) is available")
+    result = evaluate(
+        tmp_path,
+        "claude-sync-use 'é'; print -r -- $?\n"
+        "claude-sync-use work; print -r -- $? $CLAUDE_SYNC_OVERRIDE\n"
+        "print -r -- $LC_ALL",
+        env={"LC_ALL": locale},
+    )
+    assert result.stdout.splitlines() == ["1", "0 work", locale]
+
+
+def test_table_uses_the_on_disk_spelling(tmp_path, case_insensitive_fs):
+    (tmp_path / "Work" / "sub").mkdir(parents=True)
+    config.save(Config("perso", (Match(str(tmp_path / "work"), "work"),)))
+    result = evaluate(tmp_path, "print -r -- $_claude_sync_matches[1]")
+    assert result.stdout.splitlines() == [str(paths.normalize(tmp_path / "Work"))]

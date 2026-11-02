@@ -18,9 +18,9 @@ def configure(parser: argparse.ArgumentParser) -> None:
 
 def run(args: argparse.Namespace, ctx: Context) -> int:
     cfg = config.load()
-    target = paths.normalize(args.dir)
+    target = paths.key(args.dir)
     stored = paths.display(target)
-    kept = tuple(m for m in cfg.matches if paths.normalize(m.path) != target)
+    kept = tuple(m for m in cfg.matches if paths.key(m.path) != target)
     if len(kept) == len(cfg.matches):
         raise ClaudeSyncError(f"no mapping for {stored}")
     if ctx.dry_run:

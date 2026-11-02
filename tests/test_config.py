@@ -77,3 +77,36 @@ def test_path_with_control_characters_round_trips():
     original = Config("perso", (Match("/tmp/a\tb\nc\x7f", "work"),))
     config.save(original)
     assert config.load() == original
+
+
+def test_a_mapping_of_the_root_directory_is_rejected():
+    path = write('default = "perso"\n[[match]]\npath = "/"\nprofile = "w"\n')
+    with pytest.raises(ConfigError) as excinfo:
+        config.load()
+    assert str(path) in str(excinfo.value)
+    assert "'/'" in str(excinfo.value)
+
+
+def test_two_mappings_of_the_same_normalized_path_are_rejected():
+    path = write(
+        'default = "perso"\n'
+        '[[match]]\npath = "~/Dev/work"\nprofile = "work"\n'
+        '[[match]]\npath = "~/Dev/work/"\nprofile = "perso"\n'
+    )
+    with pytest.raises(ConfigError) as excinfo:
+        config.load()
+    assert str(path) in str(excinfo.value)
+    assert "~/Dev/work/" in str(excinfo.value)
+
+
+def test_paths_equal_on_a_case_insensitive_disk_are_duplicates(
+    isolated_environment, case_insensitive_fs
+):
+    (isolated_environment / "Dev" / "work").mkdir(parents=True)
+    write(
+        'default = "perso"\n'
+        '[[match]]\npath = "~/dev/work"\nprofile = "work"\n'
+        '[[match]]\npath = "~/Dev/work"\nprofile = "perso"\n'
+    )
+    with pytest.raises(ConfigError, match="duplicates"):
+        config.load()

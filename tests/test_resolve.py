@@ -64,3 +64,13 @@ def test_config_dir_and_initialized(home):
 def test_override_with_a_valid_prefix_but_invalid_tail_raises(home):
     with pytest.raises(ClaudeSyncError):
         resolve(home, CONFIG, "ab!")
+
+
+def test_wrong_case_directory_resolves_like_the_on_disk_one(home, case_insensitive_fs):
+    result = resolve(home / "dev" / "work" / "api", CONFIG, None)
+    assert (result.profile, result.source) == ("work", "match")
+
+
+def test_wrong_case_mapping_applies(home, case_insensitive_fs):
+    config = Config("perso", (Match("~/dev/work", "work"),))
+    assert resolve(home / "Dev" / "work" / "api", config, None).profile == "work"

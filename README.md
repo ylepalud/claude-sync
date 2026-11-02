@@ -76,7 +76,8 @@ profile = "work"
 ```
 
 Without the file, the default is `perso` and nothing is mapped. Unknown keys,
-missing fields and invalid names are errors that name the file. A profile name
+missing fields, invalid names, a mapping of `/` and two mappings of the same
+path are errors that name the file. A profile name
 matches `[a-z0-9][a-z0-9-]*`.
 
 A directory gets the profile of the longest mapped path that is the directory
@@ -92,8 +93,11 @@ claude-sync unmap ~/Dev/work         # remove a mapping (exit 1 if there is none
 claude-sync set-default perso        # profile used outside mapped directories
 ```
 
-Replacing the profile of an already mapped directory asks for a confirmation
-(`--yes` to skip it). After a write, these commands remind you to run
+`map` needs an existing directory (not `/`) and stores its on-disk spelling, so
+`~/dev/work` is stored as `~/Dev/work` on a case-insensitive file system.
+Mapping a directory to the profile it already has prints `already mapped` and
+writes nothing. Replacing the profile of an already mapped directory asks for a
+confirmation (`--yes` to skip it). After a write, these commands remind you to run
 `claude-sync-reload` in open shells.
 
 Read the configuration and the result:

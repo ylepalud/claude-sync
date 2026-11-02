@@ -24,11 +24,11 @@ def resolve(directory: str | Path, config: Config, override: str | None) -> Reso
                 f"invalid CLAUDE_SYNC_OVERRIDE {override!r} (expected [a-z0-9][a-z0-9-]*)"
             )
         return _build(override, "override", None)
-    target = paths.normalize(directory)
+    target = paths.key(directory)
     best = None
     best_length = -1
     for match in config.matches:
-        candidate = paths.normalize(match.path)
+        candidate = paths.key(match.path)
         length = len(candidate.parts)
         applies = target == candidate or candidate in target.parents
         if applies and length > best_length:

@@ -20,3 +20,24 @@ def isolated_environment(tmp_path, monkeypatch):
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/dev/null")
     monkeypatch.setenv("GIT_CONFIG_SYSTEM", "/dev/null")
     return home
+
+
+def _is_case_sensitive(directory) -> bool:
+    probe = directory / "CaseProbe"
+    probe.mkdir()
+    try:
+        return not (directory / "caseprobe").exists()
+    finally:
+        probe.rmdir()
+
+
+@pytest.fixture
+def case_insensitive_fs(tmp_path):
+    if _is_case_sensitive(tmp_path):
+        pytest.skip("the file system of tmp_path is case-sensitive")
+
+
+@pytest.fixture
+def case_sensitive_fs(tmp_path):
+    if not _is_case_sensitive(tmp_path):
+        pytest.skip("the file system of tmp_path is case-insensitive")
