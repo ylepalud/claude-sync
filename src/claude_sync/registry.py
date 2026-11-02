@@ -24,6 +24,8 @@ COMMAND_MODULES = (
     "shell_init",
     "profile",
     "import_cmd",
+    "status",
+    "apply",
 )
 
 

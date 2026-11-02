@@ -75,6 +75,8 @@ def test_registry_order_is_stable():
         "shell-init",
         "profile",
         "import",
+        "status",
+        "apply",
     ]
 
 

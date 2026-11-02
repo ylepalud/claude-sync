@@ -75,6 +75,7 @@ def run(args: argparse.Namespace, ctx: Context) -> int:
         print(f"would write {destination}")
         return int(ExitCode.OK)
     if destination.exists() and not ctx.confirm(f"{destination} exists; overwrite it?"):
+        print("cancelled", file=sys.stderr)
         return int(ExitCode.OK)
     manifest.save(destination, imported)
     print(f"wrote {destination}")

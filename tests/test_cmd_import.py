@@ -284,7 +284,8 @@ def test_declining_the_confirmation_leaves_the_file(capsys, source, tmp_path, mo
     target.write_text("# mine\n")
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda prompt: "n")
-    code, out, _ = run(capsys, "import", "--source", str(directory), "--output", str(target))
+    code, out, err = run(capsys, "import", "--source", str(directory), "--output", str(target))
     assert code == 0
     assert "wrote" not in out
+    assert "cancelled" in err
     assert target.read_text() == "# mine\n"
