@@ -109,8 +109,10 @@ and a hidden test-only command is not added.
   line numbers parsed from `@@ ... +<start>,<n> @@` hunk headers, and staged
   paths from `git diff --cached --name-only -z`),
   `--history` (added lines and paths of
-  `git log --all -p -U0 --no-color --no-ext-diff --format=%x00commit %H`,
-  and messages of `git log --all --format=%H%x00%B%x00`; the commit sha is
+  `git log --all -p --diff-merges=first-parent -U0 --no-color --no-ext-diff --format=%x00commit %H`
+  (merge commits included), and messages plus author and committer
+  identities of `git log --all --format=%H%x00%an %ae %cn %ce%x00%B%x00`
+  (reported as `<sha>: identity`); the commit sha is
   what is reported, not blob shas),
   `--message-file PATH`, `--text LABEL` (reads stdin). Several may be
   combined. Binary content skipped (NUL byte in the first 8 KiB; `Binary

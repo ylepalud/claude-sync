@@ -1,0 +1,9 @@
+#!/bin/sh
+# Block a commit whose staged content carries a denylisted term or a secret.
+set -e
+scripts/check-denylist --staged
+if command -v gitleaks >/dev/null 2>&1; then
+    gitleaks git --staged --redact
+else
+    echo "warning: gitleaks not installed, secret scan skipped (CI still runs it)" >&2
+fi

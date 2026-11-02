@@ -1,0 +1,3 @@
+#!/bin/sh
+# Check the full history before anything becomes public.
+exec scripts/check-denylist --history

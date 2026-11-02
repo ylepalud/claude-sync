@@ -47,8 +47,9 @@ echo file content or git output.
 
 ### Requirement: Scan targets
 The scanner SHALL be able to scan, each selected by an option: tracked files
-of the working tree including their paths, staged content, every blob and
-every commit message reachable in the history, a commit message file, and a
+of the working tree including their paths, staged content, every added line,
+path, commit message and author or committer identity reachable in the
+history (merge commits included), a commit message file, and a
 free text passed on standard input labelled by the caller (used for PR title
 and body).
 
@@ -59,6 +60,10 @@ and body).
 #### Scenario: Leak in staged content
 - **WHEN** a staged change adds a line containing a term
 - **THEN** the pre-commit hook rejects the commit
+
+#### Scenario: Leak in a commit identity
+- **WHEN** a commit's author e-mail contains a term
+- **THEN** a history scan reports `<sha>: identity` and exits with a non-zero code
 
 #### Scenario: Leak in a commit message
 - **WHEN** a commit message being written contains a term
