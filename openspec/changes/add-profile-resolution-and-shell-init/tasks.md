@@ -20,4 +20,4 @@
 
 ## 4. Documentation
 
-- [ ] 4.1 README: replace the "Status" line and add a "Profiles" section: the config file and its format (with `~/Dev/work` as the example), `map`/`unmap`/`set-default`/`which`/`list`/`config`, the `.zshrc` line `eval "$(claude-sync shell-init zsh)"`, `claude-sync-use`, `claude-sync-reload`, the prompt segment and `CLAUDE_SYNC_PROMPT=0`, that the `eval` line goes after oh-my-zsh and the theme, and that `CLAUDE_CONFIG_DIR` is only set once the profile directory exists (step 3 creates them). Mark roadmap step 2 done.
+- [x] 4.1 README: replace the "Status" line and add a "Profiles" section: the config file and its format (with `~/Dev/work` as the example), `map`/`unmap`/`set-default`/`which`/`list`/`config`, the `.zshrc` line `eval "$(claude-sync shell-init zsh)"`, `claude-sync-use`, `claude-sync-reload`, the prompt segment and `CLAUDE_SYNC_PROMPT=0`, that the `eval` line goes after oh-my-zsh and the theme, and that `CLAUDE_CONFIG_DIR` is only set once the profile directory exists (step 3 creates them). Mark roadmap step 2 done.

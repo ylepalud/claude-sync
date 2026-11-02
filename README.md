@@ -8,9 +8,10 @@ Each profile is a separate `CLAUDE_CONFIG_DIR` under
 plugins, MCP servers, history and login. A declarative `profile.toml` in each
 profile records what is installed, at which version.
 
-Status: under construction. Only the CLI frame (`version`, `help`) and the
-leak guard exist today; see the roadmap below and `openspec/changes/` for the
-planned work.
+Status: under construction. The CLI frame, the leak guard, profile
+resolution and the zsh integration exist today. Profile directories are not
+created yet (`init` comes in step 3); see the roadmap below and
+`openspec/changes/` for the planned work.
 
 ## Install
 
@@ -60,6 +61,84 @@ Exit codes:
 | 3 | confirmation required but not given (rerun with `--yes`) |
 | 4 | drift detected: state differs from what is declared |
 
+## Profiles
+
+The configuration file is `~/.config/claude-sync/config.toml`
+(`$XDG_CONFIG_HOME/claude-sync/config.toml` when `XDG_CONFIG_HOME` is set). It
+holds the default profile and the directories mapped to a profile:
+
+```toml
+default = "perso"
+
+[[match]]
+path = "~/Dev/work"
+profile = "work"
+```
+
+Without the file, the default is `perso` and nothing is mapped. Unknown keys,
+missing fields and invalid names are errors that name the file. A profile name
+matches `[a-z0-9][a-z0-9-]*`.
+
+A directory gets the profile of the longest mapped path that is the directory
+itself or one of its parents, compared after `~` expansion and symlink
+resolution, else the default. `~/Dev/work/api` is `work`; `~/Dev/workshop` is
+not.
+
+Edit the file with the commands rather than by hand:
+
+```sh
+claude-sync map ~/Dev/work work      # map a directory and everything below it
+claude-sync unmap ~/Dev/work         # remove a mapping (exit 1 if there is none)
+claude-sync set-default perso        # profile used outside mapped directories
+```
+
+Replacing the profile of an already mapped directory asks for a confirmation
+(`--yes` to skip it). After a write, these commands remind you to run
+`claude-sync-reload` in open shells.
+
+Read the configuration and the result:
+
+```sh
+claude-sync which [DIR]   # profile of DIR (default: the current directory)
+claude-sync list          # every known profile, * marks the default
+claude-sync config        # file path, whether it exists, default, mappings
+```
+
+All three accept `--json`.
+
+### Shell integration (zsh)
+
+Add this line to `~/.zshrc`, after oh-my-zsh and the theme are loaded (the
+snippet captures the theme's `RPROMPT` once, when it is first evaluated):
+
+```sh
+eval "$(claude-sync shell-init zsh)"
+```
+
+The snippet embeds the mappings, so a directory change runs no external
+process. On start and after every `cd` it:
+
+- exports `CLAUDE_SYNC_PROFILE` with the resolved profile;
+- exports `CLAUDE_CONFIG_DIR` as the profile directory, `profiles/<profile>/`
+  next to the configuration file, only when that directory exists. Step 3
+  (`init`) creates the profile directories; until then a `CLAUDE_CONFIG_DIR`
+  you set yourself is kept;
+- shows `claude:<profile>` at the start of `RPROMPT`, with a `?` when the
+  profile directory does not exist yet (`claude:work?`). Set
+  `CLAUDE_SYNC_PROMPT=0` before the `eval` line to turn the segment off.
+
+It also defines two shell functions:
+
+```sh
+claude-sync-use work     # use the work profile in this shell, whatever the directory
+claude-sync-use --auto   # back to the mappings
+claude-sync-reload       # apply configuration changes to this shell
+```
+
+`claude-sync-use` exports `CLAUDE_SYNC_OVERRIDE`, which `claude-sync which`
+honours too. Open shells keep the mappings they were started with until
+`claude-sync-reload`. Only zsh is supported.
+
 ## Development
 
 ```sh
@@ -106,7 +185,7 @@ scripts/check-denylist --tree --history
 ## Roadmap
 
 1. [x] CLI skeleton and leak guard.
-2. [ ] `shell-init` and profile resolution.
+2. [x] `shell-init` and profile resolution.
 3. [ ] `init` / `uninstall` with backup and migration.
 4. [ ] `import` / `status` / `apply` for plugins and marketplaces.
 5. [ ] Skills, MCP, settings, machine `[tools]`.
