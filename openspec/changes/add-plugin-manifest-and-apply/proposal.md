@@ -9,19 +9,23 @@ user create and lock a work profile before touching the personal one.
 
 ## What Changes
 
-- `profile.toml` in each profile: `[[marketplace]]` (name, source, ref or
-  `pinned = false`), `[[plugin]]` (id, version, enabled), optional
-  `[account] org_uuid`.
+- `profile.toml` in each profile: `[[marketplace]]` (name, source, optional
+  branch or tag `ref`, recorded `commit`), `[[plugin]]` (id, version,
+  enabled), optional `[account] org_uuid`.
 - `claude-sync import`: reads the installed state through `claude plugin list
   --json` and `claude plugin marketplace list --json` and writes a manifest;
   `--source DIR` and `--output FILE` work before any profile exists.
 - `claude-sync status`: shows the difference between the manifest and the
-  profile, exit 4 on drift, `--json`.
+  profile (including upstream movement and a sign-in to another
+  organization), exit 4 on drift, `--json`.
 - `claude-sync apply`: converges the profile to its manifest (install
   missing, sync enabled state, re-pin with confirmation, `--prune` to remove),
-  and writes the account lock into the profile's `settings.json`.
+  never approves marketplace commands on the user's behalf, and writes the
+  account guide keys into the profile's `settings.json`.
 - `claude-sync profile create NAME [--org-uuid UUID]`: a new profile
   directory with a minimal manifest and its own git repository.
+- Non-goals: migrating `~/.claude`, login, `adopt`, `launchctl` (step 4);
+  skills, MCP, general settings, `[tools]` (step 5).
 - Roadmap: steps 3 and 4 swap; the migration becomes step 4.
 
 ## Capabilities
@@ -29,8 +33,8 @@ user create and lock a work profile before touching the personal one.
 ### New Capabilities
 - `plugin-manifest`: the manifest format for plugins and marketplaces, and
   the import, status and apply commands.
-- `profile-management`: creating a profile and locking it to an
-  organization account.
+- `profile-management`: creating a profile and tying it to an
+  organization account (login guide and detection).
 
 ### Modified Capabilities
 
@@ -43,3 +47,5 @@ None.
 - No change to `~/.claude`: commands act on a profile directory or on an
   explicit `--source`.
 - README: manifest, commands, roadmap order.
+
+Reviewed against 39abea2 by fable on 2026-11-02
