@@ -10,7 +10,7 @@ from claude_sync.context import Context
 from claude_sync.errors import ClaudeSyncError, ConfirmationRequired
 from claude_sync.exit_codes import ExitCode
 
-DESCRIPTION = "Keep Claude Code configuration in sync across machines."
+DESCRIPTION = "Isolate and switch between several Claude Code user profiles."
 EXAMPLES = [
     ("claude-sync --version", "print the installed version"),
     ("claude-sync help --all", "print the help of every command"),

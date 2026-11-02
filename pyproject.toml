@@ -1,7 +1,7 @@
 [project]
 name = "claude-sync"
 version = "0.1.0"
-description = "Keep Claude Code configuration in sync across machines"
+description = "Isolate and switch between several Claude Code user profiles"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
