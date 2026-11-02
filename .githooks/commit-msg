@@ -1,0 +1,3 @@
+#!/bin/sh
+# Block a commit whose message carries a denylisted term.
+exec scripts/check-denylist --message-file "$1"

@@ -1,0 +1,5 @@
+#!/bin/sh
+# Point git at the versioned hooks in .githooks.
+set -e
+git config core.hooksPath .githooks
+echo "git hooks installed (core.hooksPath=.githooks)"

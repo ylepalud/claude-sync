@@ -1,0 +1,259 @@
+#!/usr/bin/env python3
+"""Scan this repository for denylisted terms without ever printing them."""
+
+import argparse
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+EXIT_FINDINGS = 1
+EXIT_NO_TERMS = 3
+EXIT_REFUSED = 4
+EXIT_INTERNAL = 5
+
+
+def load_terms() -> list[str]:
+    raw = os.environ.get("DENYLIST")
+    if raw is None:
+        path = Path.home() / ".config" / "claude-sync" / "denylist.txt"
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except OSError:
+            raw = ""
+    lines = (line.strip() for line in raw.splitlines())
+    return [line.lower() for line in lines if line and not line.startswith("#")]
+
+
+class Scanner:
+    def __init__(self, terms: list[str]):
+        self.terms = terms
+        self.findings: list[str] = []
+
+    def match(self, text: str) -> list[int]:
+        """Return the 1-based index of every term found in text."""
+        lowered = text.lower()
+        return [n for n, term in enumerate(self.terms, 1) if term in lowered]
+
+    def path_label(self, path: str, placeholder: str) -> str:
+        """Name a path, or its placeholder when the path itself carries a term."""
+        return placeholder if self.match(path) else path
+
+    def report(self, location: str, text: str) -> None:
+        for n in self.match(text):
+            self.findings.append(f"{location}: term #{n}")
+
+    def scan_lines(self, prefix: str, text: str) -> None:
+        for number, line in enumerate(text.split("\n"), 1):
+            self.report(f"{prefix}{number}", line)
+
+
+def git(*args: str) -> bytes:
+    return subprocess.run(["git", *args], capture_output=True, check=True).stdout  # stderr captured
+
+
+def git_names(*args: str) -> list[str]:
+    """Run a git command that prints NUL-separated names."""
+    return [n for n in git(*args).decode("utf-8", "replace").split("\0") if n]
+
+
+def is_binary(data: bytes) -> bool:
+    return b"\0" in data[:8192]
+
+
+def scan_tree(scanner: Scanner) -> None:
+    names = git_names("ls-files", "-z")
+    for position, name in enumerate(names, 1):
+        scanner.report(f"path #{position}", name)
+        label = scanner.path_label(name, f"path #{position}")
+        if os.path.islink(name):
+            # Scan where the link points, never the pointed-to file.
+            scanner.scan_lines(f"{label}:", os.fsdecode(os.readlink(name)))
+            continue
+        try:
+            data = Path(name).read_bytes()
+        except OSError:
+            continue
+        if is_binary(data):
+            continue
+        scanner.scan_lines(f"{label}:", data.decode("utf-8", "replace"))
+
+
+HUNK = re.compile(r"^@@ -\S+ \+(\d+)(?:,\d+)? @@")
+DIFF_ARGS = ["-U0", "--no-color", "--no-ext-diff"]
+
+
+def header_path(rest: str) -> str:
+    """Extract the path from the part of a `diff --git` line after the keyword."""
+    n = (len(rest) - 5) // 2
+    if n > 0 and rest[2 : 2 + n] == rest[-n:]:
+        return rest[2 : 2 + n]
+    return rest.rsplit(" b/", 1)[-1]
+
+
+def scan_diff(scanner: Scanner, text: str, sha: str = "") -> None:
+    """Scan the added lines of a unified diff, one location per added line.
+
+    With a sha (history), paths are scanned too, by position in the diff.
+    """
+    label = ""
+    file_index = 0
+    in_hunk = False
+    number = 0
+    for line in text.split("\n"):
+        if line.startswith("diff --git "):
+            file_index += 1
+            in_hunk = False
+            name = header_path(line[len("diff --git ") :])
+            placeholder = f"path #{file_index}"
+            label = scanner.path_label(name, placeholder)
+            if sha:
+                scanner.report(f"{sha}: {placeholder}", name)
+        elif line.startswith("@@"):
+            hunk = HUNK.match(line)
+            if hunk:
+                in_hunk = True
+                number = int(hunk.group(1))
+        elif in_hunk and line.startswith("+"):
+            where = f"{sha}:" if sha else ""
+            scanner.report(f"{where}{label}:{number}", line[1:])
+            number += 1
+
+
+def scan_history(scanner: Scanner) -> None:
+    # first-parent: a merge's own content shows as its diff against the first parent.
+    log = git(
+        "log", "--all", "-p", "--diff-merges=first-parent", *DIFF_ARGS, "--format=%x00commit %H"
+    )
+    for chunk in log.decode("utf-8", "replace").split("\0commit ")[1:]:
+        sha, _, diff = chunk.partition("\n")
+        scan_diff(scanner, diff, sha[:7])
+    messages = git("log", "--all", "--format=%H%x00%an %ae %cn %ce%x00%B%x00")
+    fields = messages.decode("utf-8", "replace").split("\0")
+    for sha, identity, body in zip(fields[0::3], fields[1::3], fields[2::3], strict=False):
+        short = sha.strip()[:7]
+        scanner.report(f"{short}: identity", identity)
+        scanner.report(f"{short}: message", body)
+    scan_refs(scanner)
+
+
+def scan_refs(scanner: Scanner) -> None:
+    # objecttype tells an annotated tag from a ref whose %(contents) is just a commit message.
+    refs = git("for-each-ref", "--format=%(refname)%00%(objecttype)%00%(contents)%00")
+    fields = refs.decode("utf-8", "replace").split("\0")
+    triples = zip(fields[0::3], fields[1::3], fields[2::3], strict=False)
+    for position, (name, kind, contents) in enumerate(triples, 1):
+        scanner.report(f"ref #{position}", name.strip())
+        if kind == "tag" and contents.strip():
+            scanner.report(f"ref #{position}: tag message", contents)
+
+
+def scan_staged(scanner: Scanner) -> None:
+    names = git_names("diff", "--cached", "--name-only", "-z")
+    for position, name in enumerate(names, 1):
+        scanner.report(f"path #{position}", name)
+    diff = git("diff", "--cached", *DIFF_ARGS).decode("utf-8", "replace")
+    scan_diff(scanner, diff)
+
+
+EPILOG = """\
+Findings are printed as "<location>: term #<n>", where n is the 1-based position of
+the term in the denylist. The term, the matching line and any path that contains a
+term are never printed, so CI logs stay safe to publish.
+
+Locations:
+  <path>:<line>            added or tracked line
+  path #<k>                the path itself matches (k = position in the scanned list)
+  <sha>:<path>:<line>      history, sha is the 7-character commit id
+  <sha>: message           a commit message
+  <sha>: identity          the author or committer name or e-mail of a commit
+  ref #<k>                 a branch or tag name (k = position in git for-each-ref)
+  ref #<k>: tag message    the message of an annotated tag
+  message / <label>        --message-file / --text
+
+Terms come from the DENYLIST environment variable when it is set (even empty),
+otherwise from ~/.config/claude-sync/denylist.txt: one term per line, blank lines
+and lines starting with # ignored, matching is case-insensitive.
+
+Examples:
+  scripts/check-denylist --staged
+  scripts/check-denylist --tree --history
+  scripts/check-denylist --message-file .git/COMMIT_EDITMSG
+  printf '%s' "$PR_BODY" | scripts/check-denylist --text pr-body
+
+Exit codes:
+  0  clean
+  1  findings
+  2  usage error
+  3  denylist is empty or missing
+  4  a tracked file is named denylist.txt (refused)
+  5  unexpected internal failure (details withheld)
+"""
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="check-denylist",
+        description="Scan for denylisted terms without ever printing them.",
+        epilog=EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("--tree", action="store_true", help="tracked files and their paths")
+    parser.add_argument("--staged", action="store_true", help="added lines and paths staged")
+    parser.add_argument(
+        "--history", action="store_true", help="every commit and message on every branch"
+    )
+    parser.add_argument("--message-file", metavar="PATH", help="a commit message file")
+    parser.add_argument(
+        "--text", metavar="LABEL", help="free text read from stdin, reported under LABEL"
+    )
+    return parser
+
+
+def tracked_denylist_file() -> bool:
+    names = git_names("ls-files", "-z")
+    return any(n == "denylist.txt" or n.endswith("/denylist.txt") for n in names)
+
+
+def run(args: argparse.Namespace) -> int:
+    terms = load_terms()
+    if not terms:
+        print("denylist is empty or missing", file=sys.stderr)
+        return EXIT_NO_TERMS
+    if tracked_denylist_file():
+        print("refusing to run: a tracked file is named denylist.txt", file=sys.stderr)
+        return EXIT_REFUSED
+    scanner = Scanner(terms)
+    if args.tree:
+        scan_tree(scanner)
+    if args.staged:
+        scan_staged(scanner)
+    if args.history:
+        scan_history(scanner)
+    if args.message_file is not None:
+        text = Path(args.message_file).read_bytes().decode("utf-8", "replace")
+        scanner.report("message", text)
+    if args.text is not None:
+        scanner.report(args.text, sys.stdin.buffer.read().decode("utf-8", "replace"))
+    for finding in scanner.findings:
+        print(finding)
+    return EXIT_FINDINGS if scanner.findings else 0
+
+
+def main() -> int:
+    parser = build_parser()
+    args = parser.parse_args()
+    chosen = [args.tree, args.staged, args.history, args.message_file is not None]
+    if not (any(chosen) or args.text is not None):
+        parser.error("choose at least one of --tree, --staged, --history, --message-file, --text")
+    try:
+        return run(args)
+    except Exception:
+        # Never show the exception: it could carry file content or git output.
+        print("scan failed (details withheld to keep the denylist private)", file=sys.stderr)
+        return EXIT_INTERNAL
+
+
+if __name__ == "__main__":
+    sys.exit(main())
