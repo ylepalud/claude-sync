@@ -318,8 +318,11 @@ def test_reload_fails_and_changes_nothing_when_the_config_is_invalid(tmp_path):
 
 def _utf8_locale():
     available = subprocess.run(["locale", "-a"], capture_output=True, text=True, check=False)
-    names = available.stdout.split()
-    return next((n for n in ("en_US.UTF-8", "C.UTF-8") if n in names), None)
+    # glibc lists normalized names (C.utf8), macOS the canonical ones (en_US.UTF-8).
+    names = {n.lower().replace("-", "") for n in available.stdout.split()}
+    return next(
+        (n for n in ("en_US.UTF-8", "C.UTF-8") if n.lower().replace("-", "") in names), None
+    )
 
 
 def test_names_are_checked_with_ascii_semantics_under_a_utf8_locale(tmp_path):
