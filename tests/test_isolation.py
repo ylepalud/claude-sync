@@ -11,6 +11,16 @@ def test_config_locations_are_unset():
         assert name not in os.environ
 
 
+def test_shell_integration_variables_are_unset():
+    for name in (
+        "CLAUDE_SYNC_PROFILE",
+        "CLAUDE_SYNC_OVERRIDE",
+        "CLAUDE_SYNC_PROMPT",
+        "CLAUDE_SYNC_USER_CONFIG_DIR",
+    ):
+        assert name not in os.environ
+
+
 def test_git_global_and_system_config_are_disabled():
     assert os.environ["GIT_CONFIG_GLOBAL"] == "/dev/null"
     assert os.environ["GIT_CONFIG_SYSTEM"] == "/dev/null"
