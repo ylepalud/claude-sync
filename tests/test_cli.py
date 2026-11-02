@@ -73,6 +73,10 @@ def test_registry_order_is_stable():
         "unmap",
         "set-default",
         "shell-init",
+        "profile",
+        "import",
+        "status",
+        "apply",
     ]
 
 

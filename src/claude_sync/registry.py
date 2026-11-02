@@ -22,6 +22,10 @@ COMMAND_MODULES = (
     "unmap",
     "set_default",
     "shell_init",
+    "profile",
+    "import_cmd",
+    "status",
+    "apply",
 )
 
 

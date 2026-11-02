@@ -1,13 +1,11 @@
 """The claude-sync configuration file: default profile and path mappings."""
 
-import os
 import re
-import tempfile
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from claude_sync import paths
+from claude_sync import fileio, paths
 from claude_sync.errors import ClaudeSyncError
 
 PROFILE_NAME = re.compile(r"[a-z0-9][a-z0-9-]*")
@@ -88,7 +86,7 @@ def _profile(value: object, fail, label: str) -> str:
     return value
 
 
-def _quote(value: str) -> str:
+def toml_string(value: str) -> str:
     escaped = value.replace("\\", "\\\\").replace('"', '\\"')
     for code in range(0x20):
         escaped = escaped.replace(chr(code), f"\\u{code:04x}")
@@ -97,26 +95,16 @@ def _quote(value: str) -> str:
 
 
 def _render(config: Config) -> str:
-    lines = [f"default = {_quote(config.default)}"]
+    lines = [f"default = {toml_string(config.default)}"]
     for match in config.matches:
         lines += [
             "",
             "[[match]]",
-            f"path = {_quote(match.path)}",
-            f"profile = {_quote(match.profile)}",
+            f"path = {toml_string(match.path)}",
+            f"profile = {toml_string(match.profile)}",
         ]
     return "\n".join(lines) + "\n"
 
 
 def save(config: Config) -> None:
-    directory = paths.config_home()
-    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-    fd, temp = tempfile.mkstemp(dir=directory, prefix=".config-", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(_render(config))
-        os.chmod(temp, 0o600)
-        os.replace(temp, paths.config_file())
-    except BaseException:
-        Path(temp).unlink(missing_ok=True)
-        raise
+    fileio.write_private(paths.config_file(), _render(config))
