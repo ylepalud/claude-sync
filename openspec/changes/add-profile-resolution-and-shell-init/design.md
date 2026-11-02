@@ -48,7 +48,9 @@ with `init`), the Claude Code statusline (step 5), bash or fish.
   path and the problem), `save(config)` (serializer for this fixed schema,
   values written as TOML basic strings with `\` and `"` escaped; directory
   created 700; temp file in the same directory, `chmod 600`, `os.replace`).
-  `PROFILE_NAME` regex exported for reuse.
+  `PROFILE_NAME` regex exported for reuse. `load` also rejects a match whose
+  normalized path is `/` and two matches with the same normalized path,
+  naming the duplicated path.
 - `src/claude_sync/resolve.py`: `Resolution(profile, source, match,
   config_dir, initialized)` and `resolve(directory, config, override) ->
   Resolution`. Longest normalized match path equal to the directory or an
@@ -65,8 +67,13 @@ with `init`), the Claude Code statusline (step 5), bash or fish.
   initialized, paths}`. Text: one line per profile, `*` for the default,
   `(not initialized)` suffix, mapped paths.
 - `config` (read): `{file, exists, default, matches: [{path, profile}]}`.
-- `map DIR PROFILE` (mutate): `DIR` stored with `display(normalize(DIR))`;
-  identical mapping is a no-op exit 0; a different profile for the same
+- `map DIR PROFILE` (mutate): `DIR` must be an existing directory and not
+  `/` (`ClaudeSyncError`, exit 1); it is stored with
+  `display(paths.on_disk(normalize(DIR)))`, where `on_disk` rebuilds the path
+  component by component from `os.listdir` of each parent (the entry equal
+  to the component, else the one equal under `casefold()`), so the stored
+  spelling is the one zsh's `${PWD:A}` produces; identical mapping prints
+  `already mapped: <path> -> <profile>` and exits 0 without writing; a different profile for the same
   normalized path asks `ctx.confirm`; `--dry-run` prints
   `would map <path> -> <profile>` (or `would replace ...`).
 - `unmap DIR` (mutate): removes the mapping whose normalized path equals
@@ -116,6 +123,10 @@ _claude_sync_apply
   already set). `_claude_sync_apply`: profile initialized: export its
   directory; otherwise export `CLAUDE_SYNC_USER_CONFIG_DIR` when set, else
   unset `CLAUDE_CONFIG_DIR` when it is owned.
+- Locale: the snippet's functions declare `local LC_ALL=C` before any `=~`,
+  so `[a-z]` is ASCII on every platform and the zsh check stays rendered
+  from `PROFILE_NAME.pattern` (one source for the rule). Rejected: a zsh glob
+  copy of the rule (a second definition to keep in sync).
 - Override: `claude-sync-use` exports `CLAUDE_SYNC_OVERRIDE`; `--auto`
   unsets it. `_claude_sync_apply` ignores, with one warning on stderr, an
   override that does not match the name regex (it may come from the

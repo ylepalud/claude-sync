@@ -21,3 +21,11 @@
 ## 4. Documentation
 
 - [x] 4.1 README: replace the "Status" line and add a "Profiles" section: the config file and its format (with `~/Dev/work` as the example), `map`/`unmap`/`set-default`/`which`/`list`/`config`, the `.zshrc` line `eval "$(claude-sync shell-init zsh)"`, `claude-sync-use`, `claude-sync-reload`, the prompt segment and `CLAUDE_SYNC_PROMPT=0`, that the `eval` line goes after oh-my-zsh and the theme, and that `CLAUDE_CONFIG_DIR` is only set once the profile directory exists (step 3 creates them). Mark roadmap step 2 done.
+
+## 5. Round 2 decisions (2026-11-02)
+
+- [ ] 5.1 `src/claude_sync/paths.py`: add `on_disk(path: Path) -> Path` per design (rebuild each component from `os.listdir` of its parent, exact match first, then `casefold()` match, unchanged when no entry matches). Tests in `tests/test_paths.py`: exact spelling is unchanged; on a case-insensitive file system (skip with a clear reason when `tmp_path` is case-sensitive, detected by creating `A` and checking `a` exists), `on_disk(tmp/dev)` for a directory created as `Dev` returns `tmp/Dev`.
+- [ ] 5.2 `src/claude_sync/commands/map.py`: refuse a missing directory or `/` with exit 1 and nothing written; store `display(on_disk(normalize(DIR)))`; identical mapping prints `already mapped: <path> -> <profile>` on stdout, exit 0, no write, no reminder (also under `--dry-run`). Update `--help` (description and an example). Tests in `tests/test_cmd_edit.py` for each case; adjust existing tests that mapped non-existent directories so they create them first.
+- [ ] 5.3 `src/claude_sync/config.py` `load`: reject a match whose normalized path is `/`, and two matches with the same normalized path (message names the file and the path as written). Tests in `tests/test_config.py`.
+- [ ] 5.4 `src/claude_sync/zsh.py`: add `local LC_ALL=C` in every snippet function that uses `=~` (after `emulate -L zsh`). Test in `tests/test_zsh_parity.py`: with `LC_ALL` set to a UTF-8 locale available on the machine (`en_US.UTF-8` on macOS, `C.UTF-8` on Linux; skip only if none is available), `claude-sync-use 'é'` is rejected and `claude-sync-use work` is accepted; and the locale of the caller is unchanged after the call.
+- [ ] 5.5 README: say that `map` needs an existing directory, stores its on-disk spelling, and reports `already mapped`.

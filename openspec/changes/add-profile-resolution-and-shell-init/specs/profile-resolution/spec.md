@@ -13,12 +13,17 @@ is optional: when it is absent the configuration is `default = "perso"` with
 no mappings. The file holds `default` (a profile name) and zero or more
 `[[match]]` tables with `path` and `profile`. Profile names SHALL match
 `[a-z0-9][a-z0-9-]*`. An invalid file (TOML error, unknown key, bad profile
-name, missing field) SHALL make every command that reads it fail with exit
+name, missing field, a mapping of the root directory `/`, or two mappings
+whose paths are the same once normalized) SHALL make every command that reads it fail with exit
 code 1 and a message naming the file and the problem.
 
 #### Scenario: No configuration file
 - **WHEN** no configuration file exists and the user runs `claude-sync which`
 - **THEN** the profile is `perso` and the source is `default`
+
+#### Scenario: Duplicate mapping
+- **WHEN** the configuration maps `~/Dev/work` to `work` and `~/Dev/work/` to `perso`
+- **THEN** `claude-sync which` exits with code 1 and names the file and the duplicated path
 
 #### Scenario: Invalid profile name
 - **WHEN** the configuration maps a path to the profile `Work!`
@@ -60,6 +65,11 @@ it wins, with source `override`.
 
 ### Requirement: Editing the configuration
 `claude-sync map DIR PROFILE` SHALL add or replace the mapping for `DIR`,
+which MUST be an existing directory other than `/` (otherwise exit 1, nothing
+written); the stored path SHALL use the directory's on-disk spelling, so a
+wrong letter case on a case-insensitive file system is corrected. Mapping a
+directory to the profile it already has SHALL print `already mapped: <path>
+-> <profile>`, write nothing and exit 0.
 `claude-sync unmap DIR` SHALL remove it, and `claude-sync set-default
 PROFILE` SHALL set the default. They SHALL store a path under the home
 directory with a leading `~`, create the file and its directory when needed
@@ -75,6 +85,18 @@ confirmation. `unmap` of a path with no mapping SHALL exit with code 1.
 #### Scenario: Replace needs confirmation
 - **WHEN** `~/Dev/work` maps to `work` and the user runs `claude-sync map ~/Dev/work other` without `--yes` and without a TTY
 - **THEN** nothing is written and the exit code is 3
+
+#### Scenario: Directory must exist
+- **WHEN** the user runs `claude-sync map ~/Dev/missing work --yes`
+- **THEN** the exit code is 1 and no file is written
+
+#### Scenario: On-disk spelling
+- **WHEN** `~/Dev/work` exists, the file system is case-insensitive, and the user runs `claude-sync map ~/dev/work work --yes`
+- **THEN** the stored path is `~/Dev/work`
+
+#### Scenario: Already mapped
+- **WHEN** `~/Dev/work` maps to `work` and the user runs `claude-sync map ~/Dev/work work`
+- **THEN** the output is `already mapped: ~/Dev/work -> work`, nothing is written and the exit code is 0
 
 #### Scenario: Dry run
 - **WHEN** the user runs `claude-sync map ~/Dev/work work --dry-run`

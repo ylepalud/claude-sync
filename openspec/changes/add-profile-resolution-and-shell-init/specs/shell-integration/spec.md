@@ -75,7 +75,9 @@ at once, `claude-sync-use --auto`, which unsets the override and resolves
 again, and `claude-sync-reload`, which evaluates a fresh snippet so
 configuration changes apply without a new shell. An inherited
 `CLAUDE_SYNC_OVERRIDE` that is not a valid profile name SHALL be ignored with
-a warning.
+a warning, printed once per value per shell. Profile names SHALL be checked
+with ASCII semantics whatever the locale, so the shell accepts exactly the
+names Python accepts.
 
 #### Scenario: Override in one shell
 - **WHEN** the user runs `claude-sync-use perso` in a directory mapped to `work`
