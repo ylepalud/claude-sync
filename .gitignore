@@ -16,5 +16,5 @@ build/
 
 .DS_Store
 # OpenSpec dispatch scratch space
-/openspec/changes/*/dispatch/
+/openspec/changes/**/dispatch/
 denylist.txt
