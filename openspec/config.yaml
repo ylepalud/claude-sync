@@ -1,0 +1,19 @@
+schema: spec-driven
+
+context: |
+  claude-sync is a CLI that keeps several Claude Code user configurations
+  (profiles) strictly isolated on one machine and switches between them
+  through CLAUDE_CONFIG_DIR.
+  Tech stack: Python 3.11+ standard library only (tomllib, argparse,
+  subprocess), pytest for tests, installed with `uv tool install`.
+  The shell integration is a small zsh snippet printed by
+  `claude-sync shell-init zsh`.
+  The repository is public: no employer, client or internal name may
+  appear anywhere (code, docs, commits, PRs). A denylist check enforces it.
+  Conventional Commits, everything written in English, no em dash.
+
+rules:
+  tasks:
+    - Name exact paths, symbols and acceptance criteria in every task
+    - Every CLI command task includes its --help text (description, examples, exit codes)
+    - Demand a failing test before the implementation

@@ -1,0 +1,17 @@
+# OpenSpec scratch space, never committed
+/openspec/.work/
+# OpenSpec skills and commands are installed globally
+/.claude/skills/openspec-*/
+/.claude/commands/opsx/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+
+.DS_Store
