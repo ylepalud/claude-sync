@@ -26,8 +26,8 @@ Each skill source SHALL be cloned at most once per machine, in
 `sources/<name>/` next to the configuration file, and SHALL be shared by
 every profile that declares a source of that name with the same `source`.
 claude-sync SHALL never modify files inside a clone other than through git
-fetch and checkout, and SHALL refuse to check out a clone with local
-changes, naming it.
+fetch and checkout, and apply SHALL refuse, before any change, to act on
+a declared source whose clone has local changes, naming it.
 
 #### Scenario: Two profiles, one clone
 - **WHEN** `perso` and `work` both declare the source `tools` and apply runs for both

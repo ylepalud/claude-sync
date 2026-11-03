@@ -386,12 +386,11 @@ def test_a_real_directory_stops_apply_before_any_change(capsys, setup, skills_up
 def test_two_profiles_share_one_clone(capsys, setup, skills_upstream):
     converged(capsys, setup, skills_upstream, plugins=False)
     clone = paths.config_home() / "sources" / "tools"
-    marker = clone / "marker"
-    marker.write_text("clone kept\n")
+    inode = (clone / ".git").stat().st_ino  # the same clone, not a new one
     paths.profile_dir("work").mkdir(parents=True)
     declare_skills(setup, skills_upstream, plugins=False, profile="work")
     assert run(capsys, "apply", "--profile", "work")[0] == 0
-    assert marker.exists()
+    assert (clone / ".git").stat().st_ino == inode
     assert skill_links("work") == skill_links("perso")
 
 

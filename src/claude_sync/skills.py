@@ -320,7 +320,7 @@ def plan(declared: Manifest, observed: SkillsObserved, prune: bool) -> list[Skil
       with another source or commit (see `other_profiles_conflict`), and the
       ManifestError of another profile's invalid manifest;
     - ClaudeSyncError for an existing clone of another source than declared;
-    - ClaudeSyncError for a clone with local changes that needs a checkout.
+    - ClaudeSyncError for an existing clone with local changes.
     """
     for skill in declared.skills:
         entry = observed.entries.get(skill_name(skill))
@@ -337,6 +337,9 @@ def plan(declared: Manifest, observed: SkillsObserved, prune: bool) -> list[Skil
                 f"{paths.display(clone.path)} is a clone of {clone.source}, not of "
                 f"{source.source}: remove it, or rename the source"
             )
+        # Checked here, not only before a checkout: whether a fetch moves the clone is
+        # known only after it, and by then the plugin actions have run.
+        _refuse_dirty(clone)
     actions: list[SkillAction] = []
     for source in declared.skill_sources:
         clone = observed.clones[source.name]

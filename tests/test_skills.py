@@ -252,11 +252,12 @@ def test_plan_refuses_to_check_out_a_dirty_clone(profile, skills_upstream):
     assert gitops.head(clone) == upstream.second
 
 
-def test_dirty_clone_at_its_commit_plans_nothing(profile, skills_upstream):
+def test_dirty_clone_is_refused_before_any_action_even_at_its_commit(profile, skills_upstream):
     upstream = skills_upstream
     clone = install(profile, upstream, upstream.first)
     (clone / "skills" / "alpha" / "SKILL.md").write_text("edited\n")
-    assert descriptions(profile, declare(upstream, commit=upstream.first)) == []
+    with pytest.raises(ClaudeSyncError, match="local changes"):
+        descriptions(profile, declare(upstream, commit=upstream.first))
 
 
 def test_plan_replaces_a_link_pointing_elsewhere_after_confirmation(
