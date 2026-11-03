@@ -75,3 +75,29 @@ def test_e2e_switch_keeps_the_guard_outside_the_e2e_module(tmp_path):
     )
     assert result.returncode == 0, result.stdout
     assert "1 passed" in result.stdout
+
+
+def test_real_pgrep_and_launchctl_are_blocked():
+    for program in ("pgrep", "launchctl"):
+        result = subprocess.run([program, "-x", "claude"], capture_output=True, text=True)
+        assert result.returncode == 2, program
+        assert f"real {program} blocked in tests" in result.stderr
+
+
+def test_fake_system_replaces_the_guard(fake_system, monkeypatch):
+    monkeypatch.setenv("FAKE_PGREP_PIDS", "12 34")
+    pgrep = subprocess.run(["pgrep", "-x", "claude"], capture_output=True, text=True)
+    assert (pgrep.returncode, pgrep.stdout) == (0, "12\n34\n")
+    monkeypatch.setenv("FAKE_PGREP_PIDS", "")
+    assert subprocess.run(["pgrep", "-x", "claude"], capture_output=True).returncode == 1
+    launchctl = subprocess.run(["launchctl", "unsetenv", "X"], capture_output=True)
+    assert launchctl.returncode == 0
+    monkeypatch.setenv("FAKE_LAUNCHCTL_EXIT", "5")
+    assert subprocess.run(["launchctl", "list"], capture_output=True).returncode == 5
+    assert fake_system.calls() == [
+        ["pgrep", "-x", "claude"],
+        ["pgrep", "-x", "claude"],
+        ["launchctl", "unsetenv", "X"],
+        ["launchctl", "list"],
+    ]
+    assert fake_system.log_file == Path(os.environ["HOME"]) / ".fake-system.log"

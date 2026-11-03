@@ -54,12 +54,20 @@ copying credentials, IDE integration beyond the LaunchAgent.
 - `src/claude_sync/migration.py`, pure file-system steps, each a small
   function tested alone: `backup(paths, dest) -> Path`,
   `remove_plugin_caches(profile_dir)`, `absolutize_symlinks(root,
-  old_root) -> list[Path]` (walks with `followlinks=False`, skips `.git`;
+  old_root) -> list[tuple[Path, str]]` (walks with `followlinks=False`, skips `.git`;
   rewrites only relative links whose target, resolved against the pre-move
-  location, lies outside `old_root`; returns them for the record) and
-  `relativize_symlinks(links, root)` for uninstall; `rewrite_settings(
-  profile_dir, old, new) -> list[str]` (string values equal to `old` or
-  starting with `old + "/"`; returns JSON key paths; writes with
+  location and normalised, lies outside `old_root`; returns each link's
+  relative path and original text for the record) and
+  `relativize_symlinks(links, root)` for uninstall, which writes the exact
+  original text back; `rewrite_settings(profile_dir, old, new) -> list[str]`
+  (every occurrence of `old`, and of its `~/`, `$HOME/` and `${HOME}/`
+  forms written in the same notation, inside string values, when preceded
+  by the start of the value or a character that cannot be part of a path
+  and followed by `/`, the end, or anything but a name character, `.` or
+  `-`, so `old + ".json"`, `old + "-x"` and `/backup` + `old` are left; returns JSON Pointers; the
+  reverse is the same call with `old` and `new` swapped, which also rewrites
+  values added under the profile path since migration, the intended result
+  after moving back; writes with
   `json.dumps(indent=2, ensure_ascii=False)` plus a trailing newline, the
   format Claude Code itself writes),
   `allow_manifest(profile_dir) -> bool` (uses `git check-ignore`),
@@ -70,14 +78,24 @@ copying credentials, IDE integration beyond the LaunchAgent.
   shell-init zsh)"` between the markers), `launch_agent_plist(dir) -> str`
   (`Label` = `io.github.ylepalud.claude-sync.env`, `ProgramArguments` =
   `/bin/launchctl setenv CLAUDE_CONFIG_DIR <dir>`, `RunAtLoad` true),
-  `unrebuildable(observed) -> list[str]`, and `Record` saved as
+  `unrebuildable(observed, listed) -> list[str]` (`listed` is the parsed
+  `claude plugin list --json`, every scope), and `Record` saved as
   `.claude-sync-migration.json` (old root, steps done, settings key paths,
   rewritten links, plist path), excluded from the profile repository (it is
   in no allowlist). Backup: `tarfile` gzip with `compresslevel=6`,
   `dereference=False`, member names `.claude/...` and `.claude.json`, one
-  progress line per 1000 members on stderr; extraction uses an explicit
-  `filter` that refuses absolute and escaping names (the `data` filter
-  where available, a local equivalent on 3.11).
+  progress line per 1000 members on stderr, special files (sockets, FIFOs)
+  listed as skipped. `extract_backup(archive, dest)` validates the whole
+  archive first (relative names without `..`, top-level names only
+  `.claude` and `.claude.json`; only files, directories, symlinks and hard
+  links to earlier file members), extracts member by
+  member into a fresh staging directory inside `dest` (its parent, `/Users`,
+  is not writable), checks before
+  each member that the real path of its destination (and of a hard link's
+  target) stays inside, and renames into place only when every member
+  succeeded. Rejected: the `data` filter (refuses the absolute symlinks a
+  real `~/.claude` can hold) and the `tar` filter alone (a symlink followed
+  by a hard link and a file escapes it).
 - `src/claude_sync/converge.py`: the body of the `apply` command extracted
   as `converge(profile_dir, ctx, prune=False) -> int` and
   `build_manifest(config_dir, account) -> Manifest` from `import`, so `init`
