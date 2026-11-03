@@ -267,17 +267,30 @@ def _checkout_action(dest: Path, commit: str) -> SkillAction:
     )
 
 
-def _pin_action(dest: Path, ref: str | None, recorded: list[Skill]) -> SkillAction:
-    """Check out, once cloned, the commit matching the recorded trees best."""
+def _late_checkout(clone: Clone, ref: str | None, recorded: list[Skill]) -> SkillAction:
+    """Check out, once cloned or fetched, the commit matching the recorded trees
+    best, or without trees the head of `ref`; a dirty clone that would move raises."""
+    dest = clone.path
 
     def run() -> None:
-        commit, _ = pin_from_trees(dest, ref, recorded)
-        gitops.checkout(dest, commit)
+        if recorded:
+            commit, _ = pin_from_trees(dest, ref, recorded)
+        else:
+            commit = gitops.run("rev-parse", gitops.resolve_ref(dest, ref), cwd=dest)
+        if commit != gitops.head(dest):
+            _refuse_dirty(replace(clone, dirty=gitops.dirty(dest)))
+            gitops.checkout(dest, commit)
 
-    description = _git_description(
-        dest, "checkout", "--detach", "<newest commit matching the recorded trees>"
-    )
-    return SkillAction(description, False, run)
+    what = "newest commit matching the recorded trees" if recorded else f"head of {ref}"
+    return SkillAction(_git_description(dest, "checkout", "--detach", f"<{what}>"), False, run)
+
+
+def _resolves(dest: Path, ref: str) -> bool:
+    try:
+        gitops.resolve_ref(dest, ref)
+    except ClaudeSyncError:
+        return False
+    return True
 
 
 def _link_action(verb: str, link: Path, target: Path, confirm: bool) -> SkillAction:
@@ -294,7 +307,8 @@ def plan(declared: Manifest, observed: SkillsObserved, prune: bool) -> list[Skil
     """The git commands and link changes converging the profile's skills, in order.
 
     Per source (manifest order): clone when missing (at `ref`), fetch when the
-    commit to check out is absent, then check out (detached) the recorded
+    commit to check out or the declared ref is absent (an unknown ref still
+    absent after the fetch then fails as the actions run), then check out (detached) the recorded
     commit, else the commit pinned from the recorded trees, else, for a clone
     off its declared ref, the head of that ref. Then one link per missing
     skill, a confirmed replace per link pointing elsewhere, and with `prune` a
@@ -334,7 +348,16 @@ def plan(declared: Manifest, observed: SkillsObserved, prune: bool) -> list[Skil
             if source.commit is not None:
                 actions.append(_checkout_action(clone.path, source.commit))
             elif recorded:
-                actions.append(_pin_action(clone.path, source.ref, recorded))
+                actions.append(_late_checkout(clone, source.ref, recorded))
+            continue
+        if source.ref is not None and not _resolves(clone.path, source.ref):
+            # A ref created upstream after the clone: fetch, then resolve it.
+            actions.append(_fetch_action(clone.path))
+            if source.commit is None:
+                actions.append(_late_checkout(clone, source.ref, recorded))
+            elif clone.head != source.commit:
+                _refuse_dirty(clone)
+                actions.append(_checkout_action(clone.path, source.commit))
             continue
         commit = source.commit
         if commit is None and recorded:

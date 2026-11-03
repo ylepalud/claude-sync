@@ -798,3 +798,74 @@ def test_import_puts_a_lock_entry_under_the_clone_of_its_repository(
         (SkillSource("eng", "github:acme/skills", None, upstream.first),),
         (Skill("alpha@eng", "skills/alpha", None), Skill("beta@eng", "skills/beta", "2" * 40)),
     )
+
+
+def add_feature_branch(upstream) -> str:
+    """Create `feature` upstream, one commit after `first`; return its head."""
+    git = ("-C", str(upstream.path))
+    gitops.run(*git, "checkout", "--quiet", "-b", "feature", upstream.first)
+    (upstream.path / "skills" / "beta" / "SKILL.md").write_text("# beta, feature\n")
+    gitops.run(
+        *git,
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "--quiet",
+        "-am",
+        "feature",
+    )
+    feature = gitops.run(*git, "rev-parse", "HEAD")
+    gitops.run(*git, "checkout", "--quiet", "main")
+    return feature
+
+
+def test_plan_fetches_a_ref_created_upstream_after_the_clone(profile, skills_upstream):
+    upstream = skills_upstream
+    clone = install(profile, upstream, upstream.second)
+    feature = add_feature_branch(upstream)
+    declared = declare(upstream, ref="feature")
+    sources = "~/.config/claude-sync/sources/tools"
+    assert descriptions(profile, declared) == [
+        f"run: git -C {sources} fetch --tags origin",
+        f"run: git -C {sources} checkout --detach <head of feature>",
+    ]
+    converge(profile, declared)
+    assert gitops.head(clone) == feature
+    found = skills.diff(declared, skills.observe(profile, declared))
+    assert [d.kind for d in found] == ["skill-unpinned"]
+
+
+def test_plan_fails_on_a_ref_unknown_even_after_the_fetch(profile, skills_upstream):
+    upstream = skills_upstream
+    install(profile, upstream, upstream.second)
+    declared = declare(upstream, ref="nowhere")
+    with pytest.raises(ClaudeSyncError, match="unknown ref 'nowhere'"):
+        converge(profile, declared)
+
+
+def test_plan_fetches_an_unknown_ref_before_checking_out_the_commit(profile, skills_upstream):
+    upstream = skills_upstream
+    clone = install(profile, upstream, upstream.second)
+    feature = add_feature_branch(upstream)
+    declared = declare(upstream, ref="feature", commit=feature)
+    sources = "~/.config/claude-sync/sources/tools"
+    assert descriptions(profile, declared) == [
+        f"run: git -C {sources} fetch --tags origin",
+        f"run: git -C {sources} checkout --detach {feature}",
+    ]
+    converge(profile, declared)
+    assert gitops.head(clone) == feature
+    assert skills.diff(declared, skills.observe(profile, declared)) == []
+    assert descriptions(profile, declared) == []
+
+
+def test_late_checkout_refuses_a_dirty_clone(profile, skills_upstream):
+    upstream = skills_upstream
+    clone = install(profile, upstream, upstream.second)
+    add_feature_branch(upstream)
+    (clone / "skills" / "alpha" / "SKILL.md").write_text("edited\n")
+    with pytest.raises(ClaudeSyncError, match="~/.config/claude-sync/sources/tools"):
+        converge(profile, declare(upstream, ref="feature"))
+    assert gitops.head(clone) == upstream.second
