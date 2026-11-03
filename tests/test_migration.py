@@ -833,3 +833,18 @@ def test_absolutize_symlinks_leaves_a_dangling_link_reentering_the_root(moved):
     links = migration.absolutize_symlinks(profile, old)
     assert Path("gone") not in [path for path, _ in links]
     assert os.readlink(profile / "gone") == "../.claude/missing"
+
+
+def test_absolutize_symlinks_reports_each_link_before_rewriting_it(tmp_path):
+    old, root = tmp_path / "old", tmp_path / "new"
+    (tmp_path / "target").mkdir()
+    root.mkdir()
+    (root / "link").symlink_to("../target")
+    seen = []
+
+    def on_rewrite(relative, text):
+        seen.append((relative, text, os.readlink(root / relative)))
+
+    migration.absolutize_symlinks(root, old, on_rewrite)
+    assert seen == [(Path("link"), "../target", "../target")]
+    assert os.readlink(root / "link") == str(tmp_path / "target")

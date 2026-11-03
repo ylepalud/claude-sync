@@ -13,7 +13,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -231,7 +231,11 @@ def _replace_link(path: Path, text: str) -> None:
     os.replace(temp, path)
 
 
-def absolutize_symlinks(root: Path, old_root: Path) -> list[tuple[Path, str]]:
+def absolutize_symlinks(
+    root: Path,
+    old_root: Path,
+    on_rewrite: Callable[[Path, str], None] | None = None,
+) -> list[tuple[Path, str]]:
     """Fix the relative links of `root` that the move from `old_root` broke.
 
     `root` is the tree after its move. Each relative link is resolved
@@ -242,7 +246,8 @@ def absolutize_symlinks(root: Path, old_root: Path) -> list[tuple[Path, str]]:
     links (`../rules`) stay. Absolute and dangling links stay; `.git` is
     skipped and linked directories are not followed. Returns (path relative
     to `root`, original link text) of every rewritten link, for
-    `relativize_symlinks`.
+    `relativize_symlinks`. `on_rewrite(relative, text)` is called before
+    each link is rewritten, so a caller can record it before it changes.
     """
     root, old_root = Path(root), Path(os.path.normpath(old_root))
     rewritten = []
@@ -263,11 +268,14 @@ def absolutize_symlinks(root: Path, old_root: Path) -> list[tuple[Path, str]]:
                     continue
                 if not os.path.lexists(expected):
                     continue
-                _replace_link(path, os.path.relpath(expected, path.parent))
+                new_text = os.path.relpath(expected, path.parent)
             else:
                 if not target.exists():
                     continue
-                _replace_link(path, str(target))
+                new_text = str(target)
+            if on_rewrite is not None:
+                on_rewrite(relative, text)
+            _replace_link(path, new_text)
             rewritten.append((relative, text))
     return sorted(rewritten)
 

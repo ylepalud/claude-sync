@@ -32,6 +32,7 @@ def isolated_environment(tmp_path, monkeypatch):
         "CLAUDE_SYNC_PROMPT",
         "CLAUDE_SYNC_USER_CONFIG_DIR",
         "CLAUDE_SYNC_E2E",
+        "FAKE_CLAUDE_WRITES_STATE",
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/dev/null")

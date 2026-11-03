@@ -69,13 +69,17 @@ def _managed_source(source: str) -> str:
     return f"path:{paths.display(rest)}" if kind == "path" else source
 
 
-def build_manifest(config_dir: Path, account: manifest.Account | None) -> manifest.Manifest:
+def build_manifest(
+    config_dir: Path, account: manifest.Account | None, cli: ClaudeCli | None = None
+) -> manifest.Manifest:
     """The manifest of the user-scope plugins and managed marketplaces installed in `config_dir`.
 
+    `cli` runs the `claude` commands (default: `ClaudeCli(config_dir)`); init
+    passes `ClaudeCli(None)` to read `~/.claude` with CLAUDE_CONFIG_DIR unset.
     A marketplace claude-sync cannot manage is skipped with a warning on stderr,
     and so are its plugins.
     """
-    observed = sync.observe(ClaudeCli(config_dir), config_dir)
+    observed = sync.observe(cli or ClaudeCli(config_dir), config_dir)
     markets = []
     for market in observed.marketplaces:
         if market.source is None:

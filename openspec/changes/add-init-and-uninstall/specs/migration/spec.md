@@ -36,7 +36,9 @@ naming each such plugin.
 nothing. Confirmed, it SHALL in order: write a gzip tar backup of `~/.claude`
 and `~/.claude.json` (mode 600, symbolic links stored as links, relative
 member names) under `backups/` (mode 700) next to the configuration file and
-verify it can be listed; produce the manifest of `~/.claude`; rename
+verify it can be listed; produce the manifest of `~/.claude` (running the `claude` CLI with
+`CLAUDE_CONFIG_DIR` unset, so it reads `~/.claude.json` where it is and
+never creates `~/.claude/.claude.json`); rename
 `~/.claude` to the default profile directory and `~/.claude.json` into it as
 `.claude.json`; write the migration record `.claude-sync-migration.json` in
 the profile (untracked) and update it after each later step; recreate every
@@ -70,8 +72,10 @@ with `run claude-sync apply`, and init exits 4.
 - **THEN** init lists that file and leaves its content unchanged
 
 ### Requirement: Uninstall
-`claude-sync uninstall` SHALL refuse when `~/.claude` or `~/.claude.json`
-exists, or when the profile has no migration record. Confirmed (same
+`claude-sync uninstall` SHALL refuse when the profile has no migration
+record, when `~/.claude` exists, or when `~/.claude.json` exists although the
+record says init already moved it (a migration interrupted between the two
+renames is recovered by uninstall). Confirmed (same
 confirmation and dry-run rules as init), it SHALL unload and delete the
 LaunchAgent and run `launchctl unsetenv CLAUDE_CONFIG_DIR`, remove the
 `~/.zshrc` block, reverse the recorded `settings.json` rewrite and symbolic
@@ -89,6 +93,10 @@ or escaping member names.
 #### Scenario: Round trip
 - **WHEN** the user runs `claude-sync init --yes` then `claude-sync uninstall --yes`
 - **THEN** `~/.claude` and `~/.claude.json` exist again with the same files and symbolic links as before (plugin caches rebuilt), `settings.json` names `~/.claude` again, `launchctl unsetenv CLAUDE_CONFIG_DIR` was run, and neither the shell block, the LaunchAgent nor the migration record remains
+
+#### Scenario: Interrupted between the renames
+- **WHEN** init stopped after renaming `~/.claude` but before moving `~/.claude.json`
+- **THEN** `claude-sync uninstall --yes` moves the profile back to `~/.claude` and leaves `~/.claude.json` in place
 
 #### Scenario: From backup
 - **WHEN** the migration failed half way and the user runs `claude-sync uninstall --from-backup --yes`
