@@ -1,7 +1,7 @@
 ## 1. Manifest and git layer
 
-- [ ] 1.1 Extend `src/claude_sync/manifest.py` with `SkillSource` and `Skill` per design (validation per the `skill-sources` spec: source prefixes `github:`/`git:`, optional ref, optional 40-hex commit, skill id `<name>@<source>` with the profile name rule, relative path without `..`, optional 40-hex `tree`, declared source, unique names and ids). Tests in `tests/test_manifest.py`: round trip with skills, each invalid case naming the file, manifests without skill tables unchanged.
-- [ ] 1.2 Create `src/claude_sync/gitops.py` per design. Tests in `tests/test_gitops.py` with local repositories: clone with and without ref, fetch, checkout detached, head, dirty, remote_url, toplevel (None outside a repo), `tree_at`, `commits`, `current_ref`, `url_of` and `source_of` (round trip, `.git` suffix optional), a failing command raises `ClaudeSyncError` with the command.
+- [x] 1.1 Extend `src/claude_sync/manifest.py` with `SkillSource` and `Skill` per design (validation per the `skill-sources` spec: source prefixes `github:`/`git:`, optional ref, optional 40-hex commit, skill id `<name>@<source>` with the profile name rule, relative path without `..`, optional 40-hex `tree`, declared source, unique names and ids). Tests in `tests/test_manifest.py`: round trip with skills, each invalid case naming the file, manifests without skill tables unchanged.
+- [x] 1.2 Create `src/claude_sync/gitops.py` per design. Tests in `tests/test_gitops.py` with local repositories: clone with and without ref, fetch, checkout detached, head, dirty, remote_url, toplevel (None outside a repo), `tree_at`, `commits`, `current_ref`, `url_of` and `source_of` (round trip, `.git` suffix optional), a failing command raises `ClaudeSyncError` with the command.
 
 ## 2. Skills logic
 
