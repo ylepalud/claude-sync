@@ -85,13 +85,16 @@ def command(operation: str, target: str) -> tuple[str, ...]:
 
 
 class ClaudeCli:
-    def __init__(self, config_dir: Path):
-        self.config_dir = Path(config_dir)
+    def __init__(self, config_dir: Path | None):
+        """`config_dir=None` runs the CLI with CLAUDE_CONFIG_DIR removed (`~/.claude`)."""
+        self.config_dir = Path(config_dir) if config_dir is not None else None
 
     def run(self, args: Sequence[str]) -> str:
         """Run `claude <args>` for this profile, stdin from /dev/null; its standard output."""
         command = ["claude", *args]
-        env = {**os.environ, "CLAUDE_CONFIG_DIR": str(self.config_dir)}
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CONFIG_DIR"}
+        if self.config_dir is not None:
+            env["CLAUDE_CONFIG_DIR"] = str(self.config_dir)
         try:
             result = subprocess.run(
                 command, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True

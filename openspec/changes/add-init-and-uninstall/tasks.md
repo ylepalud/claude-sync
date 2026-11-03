@@ -7,7 +7,7 @@
 
 ## 2. Reuse apply and import
 
-- [ ] 2.1 Extract `src/claude_sync/converge.py` (`converge`, `build_manifest`) from `commands/apply.py` and `commands/import_cmd.py` without behaviour change; the existing apply and import tests must pass unchanged. Let `ClaudeCli(config_dir=None)` run the CLI with `CLAUDE_CONFIG_DIR` removed from the environment. Add direct tests in `tests/test_converge.py` for both functions with the fake claude, and one for `ClaudeCli(None)`.
+- [x] 2.1 Extract `src/claude_sync/converge.py` (`converge`, `build_manifest`) from `commands/apply.py` and `commands/import_cmd.py` without behaviour change; the existing apply and import tests must pass unchanged. Let `ClaudeCli(config_dir=None)` run the CLI with `CLAUDE_CONFIG_DIR` removed from the environment. Add direct tests in `tests/test_converge.py` for both functions with the fake claude, and one for `ClaudeCli(None)`.
 
 ## 3. Commands
 
