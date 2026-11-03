@@ -16,4 +16,4 @@
 
 ## 4. Documentation
 
-- [ ] 4.1 README: a "Skills" section (tables, shared clones under `sources/`, commit pinning by apply, import from links and from the third-party lock file, unpinned sources until the first apply and import, conflicts and prune, `~/.agents` never touched) and the roadmap step 5 split into 5a (done), 5b MCP, 5c tools.
+- [x] 4.1 README: a "Skills" section (tables, shared clones under `sources/`, commit pinning by apply, import from links and from the third-party lock file, unpinned sources until the first apply and import, conflicts and prune, `~/.agents` never touched) and the roadmap step 5 split into 5a (done), 5b MCP, 5c tools.
