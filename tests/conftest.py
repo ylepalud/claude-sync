@@ -305,3 +305,65 @@ def case_insensitive_fs(tmp_path):
 def case_sensitive_fs(tmp_path):
     if not _is_case_sensitive(tmp_path):
         pytest.skip("the file system of tmp_path is case-insensitive")
+
+
+GIT_IDENTITY = ("-c", "user.name=Test", "-c", "user.email=test@example.com")
+
+
+@dataclass
+class SkillsUpstream:
+    """A local repository serving the skills `alpha` and `beta` under `skills/`."""
+
+    path: Path
+    first: str
+    """The first commit: both skills; the branch `dev` points to it."""
+    second: str
+    """HEAD of `main`: `alpha` changed, `beta` unchanged."""
+
+    @property
+    def source(self) -> str:
+        return f"git:{self.path}"
+
+    def tree(self, commit: str, skill: str) -> str:
+        return _git(self.path, "rev-parse", f"{commit}:skills/{skill}")
+
+    def commit(self, message: str = "more") -> str:
+        """Change `beta` in a new commit on `main` and return it."""
+        (self.path / "skills" / "beta" / "SKILL.md").write_text(f"# beta {message}\n")
+        _git(self.path, *GIT_IDENTITY, "commit", "--quiet", "-am", message)
+        return _git(self.path, "rev-parse", "HEAD")
+
+
+@pytest.fixture
+def skills_upstream(tmp_path_factory):
+    repo = tmp_path_factory.mktemp("skills-upstream") / "skills-repo"
+    for name in ("alpha", "beta"):
+        (repo / "skills" / name).mkdir(parents=True)
+        (repo / "skills" / name / "SKILL.md").write_text(f"# {name}\n")
+    _git(repo.parent, "init", "--quiet", "--initial-branch", "main", str(repo))
+    _git(repo, "add", ".")
+    _git(repo, *GIT_IDENTITY, "commit", "--quiet", "-m", "two skills")
+    first = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "branch", "dev")
+    (repo / "skills" / "alpha" / "SKILL.md").write_text("# alpha, revised\n")
+    _git(repo, *GIT_IDENTITY, "commit", "--quiet", "-am", "revise alpha")
+    return SkillsUpstream(repo, first, _git(repo, "rev-parse", "HEAD"))
+
+
+@pytest.fixture
+def skill_lock(isolated_environment):
+    """Write `~/.agents/.skill-lock.json` and a copy of each skill under `~/.agents/skills/`.
+
+    Call it with `{skill: entry}` (lock entries) and an optional `version` (default 3).
+    """
+    agents = isolated_environment / ".agents"
+
+    def write(entries: dict[str, dict], version: int = 3) -> Path:
+        for name in entries:
+            (agents / "skills" / name).mkdir(parents=True, exist_ok=True)
+            (agents / "skills" / name / "SKILL.md").write_text(f"# {name}\n")
+        lock = agents / ".skill-lock.json"
+        lock.write_text(json.dumps({"version": version, "skills": entries}, indent=2))
+        return lock
+
+    return write
