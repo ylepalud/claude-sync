@@ -76,3 +76,14 @@ def test_free_bytes_of_a_missing_path_is_that_of_its_nearest_existing_ancestor(
     monkeypatch.setattr(shutil, "disk_usage", usage)
     assert system.free_bytes(tmp_path / "a" / "b" / "c") == 42
     assert asked == [(tmp_path / "a").resolve()]
+
+
+def test_refuse_if_claude_runs_lists_every_process(fake_system, monkeypatch):
+    monkeypatch.setenv("FAKE_PGREP_PIDS_claude", "101")
+    monkeypatch.setenv("FAKE_PGREP_PIDS_Claude", "201")
+    with pytest.raises(ClaudeSyncError, match=r"Claude is running \(claude 101, Claude 201\)"):
+        system.refuse_if_claude_runs()
+
+
+def test_refuse_if_claude_runs_passes_when_nothing_runs(fake_system):
+    system.refuse_if_claude_runs()

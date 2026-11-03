@@ -39,6 +39,14 @@ def running_claude() -> list[tuple[str, int]]:
     return found
 
 
+def refuse_if_claude_runs() -> None:
+    """Raise, listing them, when a `claude` or `Claude` process runs."""
+    running = running_claude()
+    if running:
+        listing = ", ".join(f"{name} {pid}" for name, pid in running)
+        raise ClaudeSyncError(f"Claude is running ({listing}): quit it first")
+
+
 def launchctl(*args: str) -> str:
     """Run `launchctl <args>`; its standard output. A failure raises with its stderr."""
     command = ["launchctl", *args]

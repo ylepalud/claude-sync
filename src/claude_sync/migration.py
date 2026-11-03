@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
+from claude_sync import paths
 from claude_sync.errors import ClaudeSyncError
 from claude_sync.fileio import write_private
 from claude_sync.sync import Observed
@@ -118,6 +119,21 @@ def _validate(members: list[tarfile.TarInfo]) -> None:
         seen.add(key)
         if member.isreg():
             regular_files.add(key)
+
+
+def check_backup(archive: Path) -> None:
+    """Open `archive` and check every member as `extract_backup` would, extracting nothing.
+
+    An unreadable archive or a refused member raises `ClaudeSyncError`.
+    """
+    try:
+        with tarfile.open(archive) as tar:
+            members = tar.getmembers()
+    except (OSError, tarfile.TarError, EOFError) as error:
+        raise ClaudeSyncError(
+            f"cannot read the backup {paths.display(archive)}: {error}"
+        ) from error
+    _validate(members)
 
 
 def _inside(path: str, root: str, member: tarfile.TarInfo) -> None:
@@ -396,6 +412,23 @@ def allow_manifest(profile_dir: Path) -> bool:
     if text and not text.endswith("\n"):
         text += "\n"
     _write_in_place(gitignore, f"{text}{MANIFEST_RULE}\n")
+    return True
+
+
+def remove_manifest_rule(profile_dir: Path) -> bool:
+    """Remove the last `!/profile.toml` line of the profile's `.gitignore`; whether it removed.
+
+    The reverse of `allow_manifest`, which appends that line. Edits in place.
+    """
+    gitignore = Path(profile_dir) / ".gitignore"
+    if not gitignore.exists():
+        return False
+    lines = gitignore.read_text(encoding="utf-8").splitlines(keepends=True)
+    stripped = [line.rstrip("\n") for line in lines]
+    if MANIFEST_RULE not in stripped:
+        return False
+    index = len(stripped) - 1 - stripped[::-1].index(MANIFEST_RULE)
+    _write_in_place(gitignore, "".join(lines[:index] + lines[index + 1 :]))
     return True
 
 

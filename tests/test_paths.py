@@ -11,6 +11,7 @@ def test_xdg_config_home_is_honoured(monkeypatch, tmp_path):
     assert paths.config_file() == tmp_path / "xdg" / "claude-sync" / "config.toml"
     assert paths.profiles_root() == tmp_path / "xdg" / "claude-sync" / "profiles"
     assert paths.profile_dir("work") == tmp_path / "xdg" / "claude-sync" / "profiles" / "work"
+    assert paths.backups_dir() == tmp_path / "xdg" / "claude-sync" / "backups"
 
 
 def test_default_config_home_is_under_home(isolated_environment):

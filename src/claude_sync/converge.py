@@ -27,15 +27,26 @@ def question(actions: list[sync.Action]) -> str:
     )
 
 
-def converge(profile_dir: Path, ctx: Context, prune: bool = False) -> int:
+def converge(
+    profile_dir: Path,
+    ctx: Context,
+    prune: bool = False,
+    cli: ClaudeCli | None = None,
+    drift_hint: str = ACCEPT_HINT,
+) -> int:
     """Make the plugins and marketplaces of `profile_dir` match its manifest.
+
+    `cli` runs the `claude` commands (default: `ClaudeCli(profile_dir)`);
+    uninstall passes `ClaudeCli(None)` to rebuild `~/.claude` with
+    CLAUDE_CONFIG_DIR unset. `drift_hint` is printed after a version or commit
+    that moved upstream.
 
     Prints the dry-run listing, asks the confirmation when an action needs one,
     runs the `claude` commands, writes the account guide keys, and returns
     ExitCode.DRIFT when an upstream version or commit moved, else ExitCode.OK.
     """
     declared = manifest.load(profile_dir / manifest.MANIFEST_FILE)
-    cli = ClaudeCli(profile_dir)
+    cli = cli or ClaudeCli(profile_dir)
     observed = sync.observe(cli, profile_dir)
     actions = sync.plan(declared, observed, prune)
     org = declared.account.org_uuid if declared.account else None
@@ -59,7 +70,7 @@ def converge(profile_dir: Path, ctx: Context, prune: bool = False) -> int:
     if moved:
         for d in moved:
             print(f"{d.kind} {d.subject}: expected {d.expected!r}, found {d.actual!r}")
-        print(ACCEPT_HINT)
+        print(drift_hint)
         return int(ExitCode.DRIFT)
     return int(ExitCode.OK)
 

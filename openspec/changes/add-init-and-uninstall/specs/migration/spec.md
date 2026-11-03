@@ -78,14 +78,17 @@ record says init already moved it (a migration interrupted between the two
 renames is recovered by uninstall). Confirmed (same
 confirmation and dry-run rules as init), it SHALL unload and delete the
 LaunchAgent and run `launchctl unsetenv CLAUDE_CONFIG_DIR`, remove the
-`~/.zshrc` block, reverse the recorded `settings.json` rewrite and symbolic
-link rewrites, delete the migration record, rename the default profile
-directory back to `~/.claude` and its `.claude.json` to `~/.claude.json`,
-then remove the plugin caches and lists and rebuild them with apply in
-`~/.claude` with `CLAUDE_CONFIG_DIR` unset, and leave other profiles and the
-backups in place. With `--from-backup [FILE]` (default: the latest backup)
+`~/.zshrc` block when init added it, reverse the recorded `settings.json`
+rewrite and symbolic link rewrites, remove the `!/profile.toml` line when
+init added it, check again that `~/.claude` and `~/.claude.json` are absent,
+rename the default profile directory back to `~/.claude` and its
+`.claude.json` to `~/.claude.json`, delete the migration record (after the
+renames, so a failed rename can be retried), then, when init had removed
+the plugin caches, remove the plugin caches and lists, rebuild them with apply in `~/.claude` with `CLAUDE_CONFIG_DIR`
+unset, delete `profile.toml` when the rebuild succeeded, and leave other
+profiles and the backups in place. With `--from-backup [FILE]` (default: the latest backup)
 it SHALL instead unload the LaunchAgent, unset the variable, remove the
-shell block, move whatever exists of `~/.claude`, `~/.claude.json` and the
+shell block only when the profile's record says init added it, move whatever exists of `~/.claude`, `~/.claude.json` and the
 default profile directory aside with a `.failed-<timestamp>` suffix (never
 deleting them), and extract the backup with a filter that refuses absolute
 or escaping member names.
@@ -104,10 +107,12 @@ or escaping member names.
 
 ### Requirement: Adopt
 `claude-sync adopt [--profile NAME]` (default: the default profile) SHALL
-list the entries of `~/.claude` (and `~/.claude.json` if present), move each
+refuse a `~/.claude` that is a symbolic link or not a directory, list the
+entries of `~/.claude` (and `~/.claude.json` if present), move each
 entry whose name does not exist in the profile into it, report every
 conflict and leave it in place, and remove `~/.claude` when it ends empty.
-It SHALL ask a confirmation, support `--dry-run`, and exit 0 with a message
+It SHALL ask a confirmation before moving or removing anything (including
+empty directories), support `--dry-run`, and exit 0 with a message
 when there is nothing to adopt.
 
 #### Scenario: Adopt a recreated directory

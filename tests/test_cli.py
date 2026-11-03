@@ -78,6 +78,8 @@ def test_registry_order_is_stable():
         "status",
         "apply",
         "init",
+        "uninstall",
+        "adopt",
     ]
 
 

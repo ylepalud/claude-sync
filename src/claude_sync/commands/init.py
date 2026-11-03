@@ -20,19 +20,8 @@ MANIFEST = manifest.MANIFEST_FILE
 INTERRUPTED = 130  # 128 + SIGINT, as a shell reports an interrupted command
 
 
-def _backups() -> Path:
-    return paths.config_home() / "backups"
-
-
 def configure(parser: argparse.ArgumentParser) -> None:
     """init has no options of its own: --dry-run and --yes come with its kind."""
-
-
-def _check_not_running() -> None:
-    running = system.running_claude()
-    if running:
-        listing = ", ".join(f"{name} {pid}" for name, pid in running)
-        raise ClaudeSyncError(f"Claude is running ({listing}): quit it first")
 
 
 def _size(old: Path, old_json: Path) -> int:
@@ -67,7 +56,7 @@ def _check_files(old: Path, name: str, profile: Path) -> None:
             f"{paths.display(old)} and {paths.display(root)} are not on the same file system: "
             "init moves the configuration with a rename"
         )
-    size, free = _size(old, old_json), system.free_bytes(_backups())
+    size, free = _size(old, old_json), system.free_bytes(paths.backups_dir())
     if free < size:
         raise ClaudeSyncError(
             f"not enough free space for the backup: {size} bytes needed, {free} free"
@@ -93,7 +82,7 @@ def _check_plugins(old: Path) -> None:
 def _plan(old: Path, old_json: Path, name: str, profile: Path) -> list[str]:
     show = paths.display
     return [
-        f"back up {show(old)} and {show(old_json)} to {show(_backups())}/",
+        f"back up {show(old)} and {show(old_json)} to {show(paths.backups_dir())}/",
         f"read the plugins and marketplaces of {show(old)} for {MANIFEST}",
         f"rename {show(old)} to {show(profile)}",
         f"rename {show(old_json)} to {show(profile / STATE_FILE)}",
@@ -126,7 +115,7 @@ def run(args: argparse.Namespace, ctx: Context) -> int:
         print("a real run also checks that Claude is not running and that every plugin")
         print("can be rebuilt from the manifest")
         return int(ExitCode.OK)
-    _check_not_running()
+    system.refuse_if_claude_runs()
     _check_files(old, name, profile)
     _check_plugins(old)
     _print_plan(steps, name, "will")
@@ -149,7 +138,7 @@ def _migrate(old: Path, old_json: Path, profile: Path) -> migration.Record:
     """Every step up to the plugin rebuild; a failure carries the recovery for its point."""
     phase = "before"
     try:
-        archive = migration.backup([old, old_json], _backups())
+        archive = migration.backup([old, old_json], paths.backups_dir())
         print(f"backup written: {paths.display(archive)}")
         imported = converge.build_manifest(old, None, ClaudeCli(None))
         paths.profiles_root().mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -169,8 +158,8 @@ def _migrate(old: Path, old_json: Path, profile: Path) -> migration.Record:
         _save(record, profile, "symlinks")
         record.settings_keys = migration.rewrite_settings(profile, str(old), str(profile))
         _save(record, profile, "settings")
-        migration.allow_manifest(profile)
-        _save(record, profile, "gitignore")
+        if migration.allow_manifest(profile):
+            _save(record, profile, "gitignore")  # only a rule init added is init's to remove
         if migration.zshrc_block_add(Path.home() / ".zshrc"):
             _save(record, profile, "zshrc")  # only a block init added is init's to remove
         plist = migration.launch_agent_path()

@@ -343,7 +343,6 @@ def test_a_failing_launch_agent_load_is_recorded_for_uninstall(
     assert record.steps == migration_steps[: migration_steps.index("launch-agent")]
 
 
-@pytest.mark.xfail(strict=True, reason="claude-sync uninstall is task 3.2: remove this marker then")
 def test_uninstall_recovers_from_a_failure_after_the_first_rename(
     capsys, legacy, fake_system, failing_second_rename
 ):
@@ -505,3 +504,16 @@ def test_init_refuses_unreadable_plugin_list_output(capsys, legacy, fake_system)
     assert code == 1
     assert "`claude plugin list --json` printed invalid JSON" in err
     assert snapshot(legacy.home) == before
+
+
+def test_a_manifest_rule_the_user_already_had_is_not_recorded(
+    capsys, legacy, fake_system, reset_on_cache_removal
+):
+    gitignore = legacy.root / ".gitignore"
+    gitignore.write_text(gitignore.read_text() + migration.MANIFEST_RULE + "\n")
+    before = gitignore.read_text()
+    assert run(capsys, "init", "--yes")[0] == 0
+    profile = paths.profile_dir("perso")
+    assert (profile / ".gitignore").read_text() == before
+    steps = migration.Record.load(profile).steps
+    assert "gitignore" not in steps and "zshrc" in steps

@@ -848,3 +848,63 @@ def test_absolutize_symlinks_reports_each_link_before_rewriting_it(tmp_path):
     migration.absolutize_symlinks(root, old, on_rewrite)
     assert seen == [(Path("link"), "../target", "../target")]
     assert os.readlink(root / "link") == str(tmp_path / "target")
+
+
+def test_check_backup_accepts_a_backup(legacy_claude, tmp_path):
+    home = legacy_claude.home
+    archive = migration.backup([home / ".claude", home / ".claude.json"], tmp_path / "backups")
+    migration.check_backup(archive)
+
+
+def test_check_backup_refuses_an_escaping_member(tmp_path):
+    archive = crafted(tmp_path, ("../x", "file", b"x"))
+    with pytest.raises(ClaudeSyncError, match="backup member '../x' refused"):
+        migration.check_backup(archive)
+
+
+def _truncated_backup() -> bytes:
+    """A valid gzip tar cut in half, as an interrupted backup write leaves it."""
+    buffer = io.BytesIO()
+    payload = os.urandom(200_000)  # incompressible, so the cut falls inside the member
+    with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
+        info = tarfile.TarInfo(".claude/big")
+        info.size = len(payload)
+        tar.addfile(info, io.BytesIO(payload))
+    raw = buffer.getvalue()
+    return raw[: len(raw) // 2]
+
+
+@pytest.mark.parametrize(
+    "content",
+    [None, b"not a tar archive", _truncated_backup()],
+    ids=["missing", "garbage", "truncated"],
+)
+def test_check_backup_refuses_an_unreadable_archive(tmp_path, content):
+    archive = tmp_path / "x.tar.gz"
+    if content is not None:
+        archive.write_bytes(content)
+    with pytest.raises(ClaudeSyncError, match=f"cannot read the backup {archive}"):
+        migration.check_backup(archive)
+
+
+def test_remove_manifest_rule_removes_the_appended_line_only(tmp_path):
+    gitignore = tmp_path / ".gitignore"
+    gitignore.write_text("/*\n!/profile.tomlx\n!/profile.toml\n")
+    gitignore.chmod(0o600)
+    assert migration.remove_manifest_rule(tmp_path) is True
+    assert gitignore.read_text() == "/*\n!/profile.tomlx\n"
+    assert mode(gitignore) == 0o600
+    assert migration.remove_manifest_rule(tmp_path) is False
+    assert gitignore.read_text() == "/*\n!/profile.tomlx\n"
+
+
+def test_remove_manifest_rule_without_a_gitignore(tmp_path):
+    assert migration.remove_manifest_rule(tmp_path) is False
+    assert not (tmp_path / ".gitignore").exists()
+
+
+def test_remove_manifest_rule_removes_the_last_of_two_identical_lines(tmp_path):
+    gitignore = tmp_path / ".gitignore"
+    gitignore.write_text("!/profile.toml\n/*\n!/profile.toml\n")
+    assert migration.remove_manifest_rule(tmp_path) is True
+    assert gitignore.read_text() == "!/profile.toml\n/*\n"

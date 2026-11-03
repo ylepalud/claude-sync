@@ -27,6 +27,8 @@ COMMAND_MODULES = (
     "status",
     "apply",
     "init",
+    "uninstall",
+    "adopt",
 )
 
 
