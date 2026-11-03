@@ -9,10 +9,11 @@ plugins, MCP servers, history and login. A declarative `profile.toml` in each
 profile records what is installed, at which version.
 
 Status: under construction. The CLI frame, the leak guard, profile
-resolution, the zsh integration, `profile create` and the manifest commands
-(`import`, `status`, `apply`) exist today. Moving an existing `~/.claude`
-into a profile (`init`) comes in step 4; see the roadmap below and
-`openspec/changes/` for the planned work.
+resolution, the zsh integration, `profile create`, the manifest commands
+(`import`, `status`, `apply`) and the migration of an existing `~/.claude`
+into a profile (`init`, `uninstall`, `adopt`) exist today. Skills, MCP
+servers, settings and machine tools come in step 5; see the roadmap below
+and `openspec/changes/` for the planned work.
 
 ## Install
 
@@ -119,6 +120,8 @@ snippet captures the theme's `RPROMPT` once, when it is first evaluated):
 ```sh
 eval "$(claude-sync shell-init zsh)"
 ```
+
+`claude-sync init` appends an equivalent block for you (see Migration).
 
 The snippet embeds the mappings, so a directory change runs no external
 process. On start and after every `cd` it:
@@ -245,6 +248,163 @@ the keys are absent or different, and when the signed-in organization
 (`oauthAccount.organizationUuid` in the profile's `.claude.json`) is not
 `org_uuid`. Before the first sign-in there is nothing to compare.
 
+## Migration
+
+`init` moves an existing `~/.claude` and `~/.claude.json` into the default
+profile (`default` in `config.toml`, else `perso`); `uninstall` moves them
+back. Both rely on `pgrep` and `launchctl`, so they target macOS.
+
+Before you start:
+
+- Quit every Claude Code session and the desktop app. `init`, `uninstall`
+  and `adopt` refuse, listing the processes, while `pgrep -x claude` or
+  `pgrep -x Claude` finds one. A Claude Code binary running under another
+  name is not seen: the backup is the safety net.
+- Uninstall the plugins `init` cannot rebuild from a manifest: those
+  installed at another scope than user, and those from a marketplace
+  claude-sync does not manage (a file or claude.ai source). `init` refuses
+  and lists them.
+- Have the network: the plugins are reinstalled at the end.
+
+```sh
+claude-sync init --dry-run   # check the files, print the steps
+claude-sync init             # check, print the steps, ask once, migrate
+```
+
+`init` also refuses, changing nothing, when `~/.claude` is missing or a
+symbolic link, when `~/.claude.json` is missing, when
+`~/.claude/.claude.json` exists, when the default profile directory exists,
+when `~/.claude` and the profiles directory are on different file systems
+(the move is a rename), or when the free space is smaller than the
+configuration. `--dry-run` checks only these: it runs neither `pgrep` nor
+`claude`.
+
+Once confirmed, it runs, in order:
+
+1. Back up `~/.claude` and `~/.claude.json` to
+   `~/.config/claude-sync/backups/<UTC timestamp>.tar.gz` (gzip tar, mode
+   600, symbolic links stored as links, sockets and FIFOs skipped and
+   named). Backups are never deleted for you.
+2. Read the installed plugins and marketplaces for `profile.toml`.
+3. Rename `~/.claude` to `~/.config/claude-sync/profiles/<default>/`.
+4. Write the migration record `.claude-sync-migration.json` in the profile,
+   updated after each later step. `uninstall` works from it; it is not
+   meant for Git, and an allowlist `.gitignore` does not let it through.
+5. Rename `~/.claude.json` to the profile's `.claude.json`.
+6. Make absolute the relative symbolic links whose target lies outside
+   `~/.claude`, such as `skills/x -> ../../.agents/skills/x`; a link that
+   reached back in through `../.claude/` gets a relative text to the same
+   entry.
+7. Replace `~/.claude` by the profile path in the string values of
+   `settings.json`, in its absolute, `~/`, `$HOME/` and `${HOME}/`
+   spellings; `~/.claude.json` and similar names are left. A changed file
+   is written back with two-space indentation.
+8. Append `!/profile.toml` to the profile's `.gitignore` when the profile
+   is a git repository that ignores `profile.toml`.
+9. Append this block to `~/.zshrc`, unless its first line is already
+   there. An `eval` line you added yourself stays: keep one of the two.
+
+   ```sh
+   # >>> claude-sync >>>
+   command -v claude-sync >/dev/null && eval "$(claude-sync shell-init zsh)"
+   # <<< claude-sync <<<
+   ```
+
+10. Write `~/Library/LaunchAgents/io.github.ylepalud.claude-sync.env.plist`
+    and load it with `launchctl bootstrap gui/<uid>`. At load and at every
+    login it runs `launchctl setenv CLAUDE_CONFIG_DIR <profile>`, for the
+    apps started outside a shell (the desktop app, IDEs): they use the
+    default profile, whatever the directory. Apps already open keep their
+    environment. Whether each app honours the variable is not documented.
+11. Remove the plugin caches and lists (`plugins/cache`,
+    `plugins/marketplaces`, `installed_plugins.json`,
+    `known_marketplaces.json`; `plugins/data` stays), write `profile.toml`
+    and run `claude-sync apply`, which installs them again (network).
+12. List the Markdown files that still name `~/.claude` (`projects/`,
+    `plugins/` and `.git` are not searched). They are never rewritten: fix
+    them by hand.
+
+Then sign in again with `/login` in each profile: the login follows the
+config dir.
+
+A failure or an interrupt (Ctrl-C, exit 130) stops `init` and prints how to
+recover at that point:
+
+- before the migration record is written, nothing changed: a first rename
+  is undone (when that fails too, rename it back by hand, or restore the
+  backup);
+- after it, `claude-sync uninstall` moves the configuration back, and
+  `claude-sync uninstall --from-backup` restores the backup;
+- a failing plugin rebuild is a warning (exit 4): the profile is migrated,
+  run `claude-sync apply`.
+
+### Uninstall
+
+```sh
+claude-sync uninstall --dry-run
+claude-sync uninstall
+```
+
+`uninstall` reverses `init` from the migration record. It refuses when the
+profile has no record, when `~/.claude` exists (move it aside, or bring it
+in with `adopt`), or when `~/.claude.json` exists and the profile's own
+would replace it. In order, it unloads and deletes the LaunchAgent and runs
+`launchctl unsetenv CLAUDE_CONFIG_DIR`; removes the `~/.zshrc` block and
+the `!/profile.toml` line, each only when `init` added it; puts `~/.claude`
+back in `settings.json` (values added under the profile path since are
+rewritten too) and gives the links `init` made absolute their original text
+back; renames the profile to `~/.claude` and its `.claude.json` to
+`~/.claude.json`; deletes the record. When `init` had removed the plugin
+caches, it then removes them again and rebuilds them from `profile.toml`
+with `CLAUDE_CONFIG_DIR` unset (network), which installs the current
+upstream versions, and deletes `profile.toml`. A failing rebuild is a
+warning (exit 4) and keeps `profile.toml`: install the plugins it lists
+with `claude plugin install`. Other profiles, `config.toml` and the backups
+stay.
+
+A failure before the profile is moved back can be retried with
+`uninstall`; after it, the message says what is left to finish by hand.
+
+```sh
+claude-sync uninstall --from-backup        # the latest backup
+claude-sync uninstall --from-backup FILE   # that backup
+```
+
+`--from-backup` needs no record. It checks the whole archive first (only
+`.claude` and `.claude.json`, no absolute or escaping names), unloads the
+LaunchAgent, unsets the variable, removes the `~/.zshrc` block when a
+readable record says `init` added it, then renames whatever exists of
+`~/.claude`, `~/.claude.json` and the default profile directory with a
+`.failed-<UTC timestamp>` suffix and extracts the backup into the home
+directory. Nothing is deleted: remove the `.failed-*` entries yourself once
+you have checked them. The plugins are not rebuilt; the backup holds their
+caches.
+
+### Adopt
+
+A tool started without `CLAUDE_CONFIG_DIR` can recreate `~/.claude`. Once the
+default profile exists, the shell integration then warns once per shell,
+on standard error:
+
+```text
+claude-sync: ~/.claude exists again; claude-sync adopt moves it into a profile
+```
+
+```sh
+claude-sync adopt --dry-run          # list the moves and conflicts
+claude-sync adopt                    # into the default profile
+claude-sync adopt --profile work
+```
+
+`adopt` moves each entry of `~/.claude` whose name the profile lacks into
+it, searches a directory both have the same way, and reports any other
+entry as a conflict, left in place. `~/.claude.json` becomes the profile's
+`.claude.json` when the profile has none. Directories left empty, and
+`~/.claude` itself when it ends empty, are removed. One confirmation covers
+the moves and removals; when only conflicts remain, nothing changes and
+nothing is asked: merge them by hand. `adopt` refuses when the profile
+does not exist, or when `~/.claude` is a symbolic link or not a directory.
+
 ## Development
 
 ```sh
@@ -294,7 +454,7 @@ scripts/check-denylist --tree --history
 2. [x] `shell-init` and profile resolution.
 3. [x] Manifest: `profile create`, `import` / `status` / `apply` for plugins
    and marketplaces.
-4. [ ] `init` / `uninstall` with backup and migration.
+4. [x] `init` / `uninstall` with backup and migration, `adopt`.
 5. [ ] Skills, MCP, settings, machine `[tools]`.
 
 ## License

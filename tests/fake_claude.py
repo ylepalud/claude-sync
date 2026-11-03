@@ -1,18 +1,24 @@
 """A stand-in for the `claude` CLI's `plugin` commands, for tests.
 
-State lives in `$CLAUDE_CONFIG_DIR/fake-claude.json`:
+The config dir is `$CLAUDE_CONFIG_DIR`, or `$HOME/.claude` when it is unset
+(as for the real CLI). State lives in `<config dir>/fake-claude.json`:
 
     {"marketplaces": [{"name", "source", "repo" | "url" | "path", "ref"?,
                        "installLocation"}],
      "plugins": [{"id", "version", "scope", "enabled"}],
      "catalog": {"<marketplace>": {"<plugin>": "<version>"}},
      "upstream": {"<owner/repo or url>": "<local git repo path>"},
-     "fail": {"<subcommand words>": "<stderr text>"}}
+     "fail": {"<subcommand words>": "<stderr text>"},
+     "output": {"<subcommand words>": "<stdout text replacing the normal output>"}}
 
 `marketplace add X[#R]` clones `upstream[X]` with `git clone --branch R` and
 reads the marketplace name and catalog from its `.claude-plugin/marketplace.json`.
-Every call is appended to `$CLAUDE_CONFIG_DIR/fake-claude.log` as one JSON line
-`{"argv": [...], "stdin": "devnull" | "other"}`.
+Every call is appended to `<config dir>/fake-claude.log` as one JSON line
+`{"argv": [...], "stdin": "devnull" | "other", "config_dir_env": <CLAUDE_CONFIG_DIR or null>}`.
+
+With `FAKE_CLAUDE_WRITES_STATE=1`, every call creates the CLI's state file
+when it is missing, as the real CLI does at start: `<config dir>/.claude.json`
+when `CLAUDE_CONFIG_DIR` is set, else `$HOME/.claude.json`.
 """
 
 import json
@@ -185,6 +191,8 @@ def run(argv: list[str], config: Path) -> str:
     words = _command_words(argv)
     if words in state["fail"]:
         raise Exit(1, state["fail"][words])
+    if words in state.get("output", {}):
+        return state["output"][words]
     if words == "plugin list":
         return json.dumps(state["plugins"], indent=2)
     if words == "plugin marketplace list":
@@ -206,14 +214,17 @@ def run(argv: list[str], config: Path) -> str:
 
 
 def main(argv: list[str]) -> int:
-    config_dir = os.environ.get("CLAUDE_CONFIG_DIR")
-    if not config_dir:
-        print("fake claude: CLAUDE_CONFIG_DIR is not set", file=sys.stderr)
-        return 1
-    config = Path(config_dir)
+    config_dir = os.environ.get("CLAUDE_CONFIG_DIR") or None
+    home = Path(os.environ["HOME"])
+    config = Path(config_dir) if config_dir else home / ".claude"
     config.mkdir(parents=True, exist_ok=True)
+    if os.environ.get("FAKE_CLAUDE_WRITES_STATE") == "1":
+        state_file = config / ".claude.json" if config_dir else home / ".claude.json"
+        if not state_file.exists():
+            state_file.write_text("{}\n")
+    entry = {"argv": argv, "stdin": _stdin_kind(), "config_dir_env": config_dir}
     with (config / LOG_FILE).open("a") as log:
-        log.write(json.dumps({"argv": argv, "stdin": _stdin_kind()}) + "\n")
+        log.write(json.dumps(entry) + "\n")
     try:
         output = run(argv, config)
     except Exit as error:

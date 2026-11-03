@@ -26,6 +26,9 @@ COMMAND_MODULES = (
     "import_cmd",
     "status",
     "apply",
+    "init",
+    "uninstall",
+    "adopt",
 )
 
 

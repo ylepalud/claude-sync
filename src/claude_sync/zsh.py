@@ -44,6 +44,13 @@ _claude_sync_apply() {
       unset CLAUDE_CONFIG_DIR
     fi
   fi
+  # Something recreated ~/.claude after the migration: say so once per shell.
+  if (( ! ${+_claude_sync_stray_warned} )) \
+      && [[ -d $_claude_sync_root/$_claude_sync_default && -e $HOME/.claude ]]; then
+    typeset -g _claude_sync_stray_warned=1
+    print -ru2 -- "claude-sync: ~/.claude exists again;" \
+      "claude-sync adopt moves it into a profile"
+  fi
   [[ ${CLAUDE_SYNC_PROMPT-} == 0 ]] ||
     RPROMPT="claude:${REPLY}${mark}${_claude_sync_rprompt_base:+ $_claude_sync_rprompt_base}"
 }

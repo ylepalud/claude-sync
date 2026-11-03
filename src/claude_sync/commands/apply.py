@@ -1,17 +1,11 @@
 from __future__ import annotations
 
 import argparse
-import shlex
-import sys
 
-from claude_sync import manifest, settings, sync, target
-from claude_sync.claude_cli import ClaudeCli
+from claude_sync import converge, target
 from claude_sync.context import Context
 from claude_sync.exit_codes import ExitCode
 from claude_sync.registry import Command
-
-ACCEPT_HINT = "accept with: claude-sync import"
-UPSTREAM_KINDS = ("version", "commit")
 
 
 def configure(parser: argparse.ArgumentParser) -> None:
@@ -25,50 +19,13 @@ def configure(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _command_line(action: sync.Action) -> str:
-    return "claude " + shlex.join(action.args)
-
-
-def _question(actions: list[sync.Action]) -> str:
-    listing = "\n".join(f"  {_command_line(a)}" for a in actions if a.confirm)
-    return (
-        "Removing a marketplace uninstalls its plugins and deletes their data. "
-        f"These commands will run:\n{listing}\nContinue?"
-    )
+# Kept as a module attribute for callers and tests that format the confirmation.
+_question = converge.question
 
 
 def run(args: argparse.Namespace, ctx: Context) -> int:
     profile = target.resolve_target(args.profile)
-    declared = manifest.load(profile.directory / manifest.MANIFEST_FILE)
-    cli = ClaudeCli(profile.directory)
-    observed = sync.observe(cli, profile.directory)
-    actions = sync.plan(declared, observed, args.prune)
-    org = declared.account.org_uuid if declared.account else None
-    write_guide = org is not None and observed.guide != org
-    if ctx.dry_run:
-        for action in actions:
-            print(f"would run: {_command_line(action)}")
-        if write_guide:
-            print(f"would write forceLoginMethod and forceLoginOrgUUID to {profile.directory}")
-        return int(ExitCode.OK)
-    if any(a.confirm for a in actions) and not ctx.confirm(_question(actions)):
-        print("cancelled", file=sys.stderr)
-        return int(ExitCode.OK)
-    for action in actions:
-        cli.run(action.args)
-    if write_guide:
-        settings.apply_guide(profile.directory, org)
-    moved = [
-        d
-        for d in sync.diff(declared, sync.observe(cli, profile.directory))
-        if d.kind in UPSTREAM_KINDS
-    ]
-    if moved:
-        for d in moved:
-            print(f"{d.kind} {d.subject}: expected {d.expected!r}, found {d.actual!r}")
-        print(ACCEPT_HINT)
-        return int(ExitCode.DRIFT)
-    return int(ExitCode.OK)
+    return converge.converge(profile.directory, ctx, args.prune)
 
 
 COMMAND = Command(

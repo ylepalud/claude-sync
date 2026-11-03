@@ -243,3 +243,22 @@ def test_marketplace_commit_of_a_repository_without_commits_is_none(profile, tmp
     empty.mkdir()
     subprocess.run(["git", "-C", str(empty), "init", "--quiet"], check=True)
     assert ClaudeCli(profile).marketplace_commit(str(empty)) is None
+
+
+def _env_printer(tmp_path, monkeypatch):
+    stub = tmp_path / "bin" / "claude"
+    stub.parent.mkdir()
+    stub.write_text('#!/bin/sh\necho "[${CLAUDE_CONFIG_DIR-unset}]"\n')
+    stub.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{stub.parent}{os.pathsep}{os.environ['PATH']}")
+
+
+def test_without_a_config_dir_claude_runs_with_the_variable_removed(tmp_path, monkeypatch):
+    _env_printer(tmp_path, monkeypatch)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/should/not/leak")
+    assert ClaudeCli(None).run([]).strip() == "[unset]"
+
+
+def test_with_a_config_dir_claude_runs_with_the_variable_set(tmp_path, monkeypatch):
+    _env_printer(tmp_path, monkeypatch)
+    assert ClaudeCli(tmp_path / "p").run([]).strip() == f"[{tmp_path / 'p'}]"

@@ -344,3 +344,34 @@ def test_table_uses_the_on_disk_spelling(tmp_path, case_insensitive_fs):
     config.save(Config("perso", (Match(str(tmp_path / "work"), "work"),)))
     result = evaluate(tmp_path, "print -r -- $_claude_sync_matches[1]")
     assert result.stdout.splitlines() == [str(paths.normalize(tmp_path / "Work"))]
+
+
+STRAY_WARNING = "claude-sync: ~/.claude exists again; claude-sync adopt moves it into a profile"
+
+
+def test_a_stray_claude_directory_is_reported_once_per_shell(tmp_path):
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    config.save(Config("perso", ()))
+    paths.profile_dir("perso").mkdir(parents=True)
+    (Path.home() / ".claude").mkdir()
+    result = evaluate(tmp_path, "cd a; cd ../b")
+    assert result.returncode == 0, result.stderr
+    assert result.stderr.splitlines() == [STRAY_WARNING]
+
+
+def test_no_stray_warning_before_the_migration(tmp_path):
+    (tmp_path / "a").mkdir()
+    config.save(Config("perso", ()))
+    (Path.home() / ".claude").mkdir()
+    result = evaluate(tmp_path, "cd a")
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+
+
+def test_no_stray_warning_without_a_claude_directory(tmp_path):
+    config.save(Config("perso", ()))
+    paths.profile_dir("perso").mkdir(parents=True)
+    result = evaluate(tmp_path, "cd /")
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""

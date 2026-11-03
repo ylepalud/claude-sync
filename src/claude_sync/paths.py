@@ -22,6 +22,11 @@ def profile_dir(name: str) -> Path:
     return profiles_root() / name
 
 
+def backups_dir() -> Path:
+    """Where init writes its backups of `~/.claude` and `~/.claude.json`."""
+    return config_home() / "backups"
+
+
 def normalize(path: str | Path) -> Path:
     """Expand `~`, make absolute against the cwd and resolve symlinks."""
     return (Path.cwd() / Path(path).expanduser()).resolve(strict=False)
