@@ -607,3 +607,23 @@ def test_rebuild_drift_says_the_upstream_versions_were_kept(capsys, migrated):
     assert "accept with: claude-sync import" not in out + err
     assert "the plugins were rebuilt with the upstream versions" in out
     assert not os.path.lexists(migrated.root / "profile.toml")
+
+
+def test_uninstall_never_clones_or_relinks_declared_skills(
+    capsys, legacy, fake_system, skill_lock, reset_on_cache_removal
+):
+    skill_lock(
+        {
+            "out": {
+                "source": "acme/skills",
+                "sourceType": "github",
+                "skillPath": "skills/out/SKILL.md",
+                "skillFolderHash": "b" * 40,
+            }
+        }
+    )
+    assert run(capsys, "init", "--yes")[0] == 0
+    code, _, err = run(capsys, "uninstall", "--yes")
+    assert (code, err) == (0, "")
+    assert os.readlink(legacy.root / "skills" / "out") == "../../.agents/skills/out"
+    assert not (paths.config_home() / "sources").exists()

@@ -209,7 +209,13 @@ def test_init_migrates_the_configuration_into_the_default_profile(
     profile = paths.profile_dir("perso")
     rule = (legacy.root / "rules" / "r.md").read_text()
     code, out, err = run(capsys, "init", "--yes")
-    assert (code, err) == (0, "")
+    assert code == 0
+    # the skill import cannot record the two legacy links
+    assert err.splitlines() == [
+        "claude-sync: warning: skipped ~/.claude/skills/in: ~/.claude/rules is not a skill source",
+        "claude-sync: warning: skipped ~/.claude/skills/out: "
+        "no github entry 'out' in ~/.agents/.skill-lock.json",
+    ]
     assert not os.path.lexists(home / ".claude")
     assert not os.path.lexists(home / ".claude.json")
     assert (profile / ".claude.json").read_text() == '{"numStartups": 3}\n'
@@ -517,3 +523,26 @@ def test_a_manifest_rule_the_user_already_had_is_not_recorded(
     assert (profile / ".gitignore").read_text() == before
     steps = migration.Record.load(profile).steps
     assert "gitignore" not in steps and "zshrc" in steps
+
+
+def test_init_declares_the_skills_but_leaves_their_links_and_clones_nothing(
+    capsys, legacy, fake_system, skill_lock, reset_on_cache_removal
+):
+    skill_lock(
+        {
+            "out": {
+                "source": "acme/skills",
+                "sourceType": "github",
+                "skillPath": "skills/out/SKILL.md",
+                "skillFolderHash": "b" * 40,
+            }
+        }
+    )
+    profile = paths.profile_dir("perso")
+    assert run(capsys, "init", "--yes")[0] == 0
+    declared = manifest.load(profile / manifest.MANIFEST_FILE)
+    assert [s.id for s in declared.skills] == ["out@acme-skills"]
+    assert os.readlink(profile / "skills" / "out") == str(
+        legacy.home / ".agents" / "skills" / "out"
+    )
+    assert not (paths.config_home() / "sources").exists()

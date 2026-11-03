@@ -159,3 +159,37 @@ def test_a_drift_line_is_never_also_information(capsys, profile):
     _, out, _ = run(capsys, "status", "--profile", "perso")
     info = [line for line in out.splitlines() if line.startswith("  info:")]
     assert len(info) == 1 and "unpinned tools" in info[0]
+
+
+def declare_skills(directory, declared, upstream, commit=None):
+    source = manifest.SkillSource("tools", upstream.source, None, commit)
+    skills = tuple(manifest.Skill(f"{s}@tools", f"skills/{s}", None) for s in ("alpha", "beta"))
+    manifest.save(
+        directory / manifest.MANIFEST_FILE,
+        manifest.Manifest(declared.marketplaces, declared.plugins, None, (source,), skills),
+    )
+
+
+def test_missing_skills_are_drift_and_an_unpinned_source_is_information(
+    capsys, profile, skills_upstream
+):
+    directory, declared = profile
+    declare_skills(directory, declared, skills_upstream)
+    code, out, _ = run(capsys, "status", "--profile", "perso")
+    assert code == 4
+    assert "  drift: clone-missing tools:" in out
+    assert "  drift: skill-missing alpha@tools:" in out
+    assert run(capsys, "apply", "--profile", "perso")[0] == 0
+    code, out, _ = run(capsys, "status", "--profile", "perso")
+    assert code == 0
+    assert out.splitlines()[0] == "profile perso: no drift"
+    assert f"  info: skill-unpinned tools: expected None, found {skills_upstream.second!r}" in out
+
+
+def test_skill_differences_are_in_the_json(capsys, profile, skills_upstream):
+    directory, declared = profile
+    declare_skills(directory, declared, skills_upstream, skills_upstream.first)
+    code, out, _ = run(capsys, "status", "--profile", "perso", "--json")
+    assert code == 4
+    kinds = {(d["kind"], d["drift"]) for d in json.loads(out)["differences"]}
+    assert {("clone-missing", True), ("skill-missing", True)} <= kinds

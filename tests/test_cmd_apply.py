@@ -41,7 +41,7 @@ class Setup:
         return self.fake.calls(self.directory)
 
     def installed(self):
-        return {p["id"]: p["enabled"] for p in self.state()["plugins"]}
+        return {p["id"]: p["enabled"] for p in self.state().get("plugins", [])}
 
 
 @pytest.fixture
@@ -274,3 +274,160 @@ def test_the_question_leaves_out_actions_that_need_no_confirmation():
     question = apply_cmd._question(actions)
     assert "claude plugin marketplace remove tools" in question
     assert "other@elsewhere" not in question
+
+
+# Skills
+
+
+def declare_skills(setup, upstream, *, commit=None, name="tools", plugins=True, profile="perso"):
+    """Write the manifest of `profile`: the plugin marketplace of `setup` plus two skills."""
+    market = manifest.Marketplace("tools", "github:acme/tools", None, setup.commit)
+    declared = manifest.Manifest(
+        (market,) if plugins else (),
+        (manifest.Plugin("lint@tools", "1.0.0", True),) if plugins else (),
+        None,
+        (manifest.SkillSource(name, upstream.source, None, commit or upstream.first),),
+        tuple(manifest.Skill(f"{s}@{name}", f"skills/{s}", None) for s in ("alpha", "beta")),
+    )
+    manifest.save(paths.profile_dir(profile) / manifest.MANIFEST_FILE, declared)
+    return declared
+
+
+def skill_links(profile="perso"):
+    directory = paths.profile_dir(profile) / "skills"
+    return {p.name: p.readlink() for p in sorted(directory.iterdir())} if directory.exists() else {}
+
+
+def test_converge_a_profile_with_plugins_and_skills_then_status_is_clean(
+    capsys, setup, skills_upstream
+):
+    declare_skills(setup, skills_upstream)
+    code, _, _ = run(capsys, "apply", "--profile", "perso")
+    assert code == 0
+    clone = paths.config_home() / "sources" / "tools"
+    assert setup.installed() == {"lint@tools": True}
+    assert skill_links() == {"alpha": clone / "skills" / "alpha", "beta": clone / "skills" / "beta"}
+    assert run(capsys, "status", "--profile", "perso")[0] == 0
+
+
+def test_dry_run_lists_plugin_and_skill_actions_and_changes_nothing(capsys, setup, skills_upstream):
+    declare_skills(setup, skills_upstream)
+    code, out, _ = run(capsys, "apply", "--profile", "perso", "--dry-run")
+    assert code == 0
+    lines = out.splitlines()
+    sources = "~/.config/claude-sync/sources/tools"
+    skills_dir = "~/.config/claude-sync/profiles/perso/skills"
+    assert lines[0].startswith("would run: claude plugin marketplace add")
+    assert lines[-4:] == [
+        f"would run: git clone {skills_upstream.source[4:]} {sources}",
+        f"would run: git -C {sources} checkout --detach {skills_upstream.first}",
+        f"would link {skills_dir}/alpha -> {sources}/skills/alpha",
+        f"would link {skills_dir}/beta -> {sources}/skills/beta",
+    ]
+    assert setup.installed() == {}
+    assert not (paths.config_home() / "sources").exists()
+
+
+def converged(capsys, setup, upstream, **kwargs):
+    declare_skills(setup, upstream, **kwargs)
+    assert run(capsys, "apply", "--profile", "perso")[0] == 0
+
+
+def foreign_link(name="alpha"):
+    foreign = paths.profile_dir("perso").parent.parent / "foreign" / name
+    foreign.mkdir(parents=True)
+    link = paths.profile_dir("perso") / "skills" / name
+    link.parent.mkdir(exist_ok=True)
+    link.symlink_to(foreign)
+    return link, foreign
+
+
+def test_replacing_a_foreign_link_needs_a_confirmation(capsys, setup, skills_upstream):
+    declare_skills(setup, skills_upstream)
+    link, foreign = foreign_link()
+    code, _, err = run(capsys, "apply", "--profile", "perso")
+    assert code == 3
+    assert f"replace {paths.display(link)} -> " in err
+    assert link.readlink() == foreign
+    assert setup.installed() == {}
+    assert not (paths.config_home() / "sources").exists()
+    assert run(capsys, "apply", "--profile", "perso", "--yes")[0] == 0
+    assert link.readlink() == paths.config_home() / "sources" / "tools" / "skills" / "alpha"
+
+
+def test_prune_removes_only_undeclared_links_into_sources(capsys, setup, skills_upstream):
+    converged(capsys, setup, skills_upstream)
+    directory = paths.profile_dir("perso") / "skills"
+    clone = paths.config_home() / "sources" / "tools"
+    (directory / "stale").symlink_to(clone / "skills" / "alpha")
+    (directory / "mine").mkdir()
+    foreign_link("elsewhere")
+    assert run(capsys, "apply", "--profile", "perso")[0] == 0
+    assert (directory / "stale").is_symlink()
+    code, _, err = run(capsys, "apply", "--profile", "perso", "--prune")
+    assert code == 3 and "remove " in err
+    assert run(capsys, "apply", "--profile", "perso", "--prune", "--yes")[0] == 0
+    assert sorted(p.name for p in directory.iterdir()) == ["alpha", "beta", "elsewhere", "mine"]
+
+
+def test_a_real_directory_stops_apply_before_any_change(capsys, setup, skills_upstream):
+    declare_skills(setup, skills_upstream)
+    conflict = paths.profile_dir("perso") / "skills" / "alpha"
+    conflict.mkdir(parents=True)
+    (conflict / "SKILL.md").write_text("mine\n")
+    code, _, err = run(capsys, "apply", "--profile", "perso", "--yes")
+    assert code == 1
+    assert "skills/alpha" in err
+    assert (conflict / "SKILL.md").read_text() == "mine\n"
+    assert setup.installed() == {}
+    assert not (paths.config_home() / "sources").exists()
+
+
+def test_two_profiles_share_one_clone(capsys, setup, skills_upstream):
+    converged(capsys, setup, skills_upstream, plugins=False)
+    clone = paths.config_home() / "sources" / "tools"
+    marker = clone / "marker"
+    marker.write_text("clone kept\n")
+    paths.profile_dir("work").mkdir(parents=True)
+    declare_skills(setup, skills_upstream, plugins=False, profile="work")
+    assert run(capsys, "apply", "--profile", "work")[0] == 0
+    assert marker.exists()
+    assert skill_links("work") == skill_links("perso")
+
+
+def test_a_skill_changed_since_install_is_reported_with_exit_4(capsys, setup, skills_upstream):
+    upstream = skills_upstream
+    trees = {s: upstream.tree(upstream.first, s) for s in ("alpha", "beta")}
+    market = manifest.Marketplace("tools", "github:acme/tools", None, setup.commit)
+    declared = manifest.Manifest(
+        (market,),
+        (),
+        None,
+        (manifest.SkillSource("tools", upstream.source, None, upstream.second),),
+        tuple(manifest.Skill(f"{s}@tools", f"skills/{s}", trees[s]) for s in ("alpha", "beta")),
+    )
+    manifest.save(setup.directory / manifest.MANIFEST_FILE, declared)
+    code, out, _ = run(capsys, "apply", "--profile", "perso")
+    assert code == 4
+    assert "skill-tree alpha@tools" in out
+    assert "accept with: claude-sync import" in out
+
+
+@pytest.mark.parametrize("name", ["import", "status", "apply"])
+def test_help_mentions_skills_in_the_description_and_an_example(name, capsys):
+    from claude_sync import registry
+
+    command = next(c for c in registry.COMMANDS if c.name == name)
+    assert "skill" in command.description
+    assert any("skill" in explanation for _, explanation in command.examples)
+
+
+def test_a_failing_plugin_action_leaves_the_skills_untouched(capsys, setup, skills_upstream):
+    declare_skills(setup, skills_upstream)
+    state = setup.state()
+    state["fail"] = {"plugin install": "boom"}
+    setup.fake.seed(setup.directory, state)
+    code, _, err = run(capsys, "apply", "--profile", "perso", "--yes")
+    assert code == 1 and "boom" in err
+    assert skill_links() == {}
+    assert not (paths.config_home() / "sources").exists()
