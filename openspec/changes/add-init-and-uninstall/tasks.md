@@ -22,4 +22,4 @@
 
 ## 5. Documentation
 
-- [ ] 5.1 README: a "Migration" section (what `init` does step by step, the backup location, `/login` per profile, the `.zshrc` block and the LaunchAgent, Markdown files to fix by hand, `uninstall` and `--from-backup`, `adopt` and the shell warning, quit Claude Code sessions and the desktop app first, plugins that block init) and roadmap step 4 marked done.
+- [x] 5.1 README: a "Migration" section (what `init` does step by step, the backup location, `/login` per profile, the `.zshrc` block and the LaunchAgent, Markdown files to fix by hand, `uninstall` and `--from-backup`, `adopt` and the shell warning, quit Claude Code sessions and the desktop app first, plugins that block init) and roadmap step 4 marked done.
