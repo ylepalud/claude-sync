@@ -4,6 +4,7 @@ import re
 import tomllib
 import uuid
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from pathlib import Path
 
 from claude_sync import fileio, paths
@@ -15,6 +16,8 @@ MANIFEST_FILE = "profile.toml"
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _COMMIT = re.compile(r"[0-9a-f]{40}")
 _GITHUB = re.compile(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+")
+_ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_KEYCHAIN = re.compile(r"[^/]+(/[^/]+)?")
 
 
 class ManifestError(ClaudeSyncError):
@@ -57,12 +60,26 @@ class Skill:
 
 
 @dataclass(frozen=True)
+class McpServer:
+    """A user-scope MCP server; `env` and `headers` hold references, never secrets."""
+
+    name: str
+    transport: str
+    command: str | None = None
+    args: tuple[str, ...] = ()
+    url: str | None = None
+    env: dict[str, str] = dataclass_field(default_factory=dict)
+    headers: dict[str, str] = dataclass_field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class Manifest:
     marketplaces: tuple[Marketplace, ...]
     plugins: tuple[Plugin, ...]
     account: Account | None
     skill_sources: tuple[SkillSource, ...] = ()
     skills: tuple[Skill, ...] = ()
+    mcp: tuple[McpServer, ...] = ()
 
 
 def load(path: Path) -> Manifest:
@@ -96,7 +113,7 @@ def _parse(data: dict, file: Path) -> Manifest:
     def fail(problem: str) -> ManifestError:
         return ManifestError(f"{file}: {problem}")
 
-    unknown = set(data) - {"marketplace", "plugin", "account", "skill_source", "skill"}
+    unknown = set(data) - {"marketplace", "plugin", "account", "skill_source", "skill", "mcp"}
     if unknown:
         raise fail(f"unknown key {sorted(unknown)[0]!r}")
 
@@ -146,6 +163,15 @@ def _parse(data: dict, file: Path) -> Manifest:
             raise fail(f"skill {skill.id!r} uses undeclared skill source {origin!r}")
         skills.append(skill)
 
+    servers = []
+    server_names: set[str] = set()
+    for table in _tables(data, "mcp", fail):
+        server = _mcp(table, fail)
+        if server.name in server_names:
+            raise fail(f"duplicate MCP server {server.name!r}")
+        server_names.add(server.name)
+        servers.append(server)
+
     account = None
     if "account" in data:
         table = data["account"]
@@ -153,7 +179,9 @@ def _parse(data: dict, file: Path) -> Manifest:
             raise fail("'account' must be a table")
         _check_keys(table, {"org_uuid"}, set(), "account", fail)
         account = Account(_uuid(table["org_uuid"], fail))
-    return Manifest(tuple(marketplaces), tuple(plugins), account, tuple(sources), tuple(skills))
+    return Manifest(
+        tuple(marketplaces), tuple(plugins), account, tuple(sources), tuple(skills), tuple(servers)
+    )
 
 
 def _string(value: object, label: str, fail) -> str:
@@ -224,6 +252,77 @@ def _skill(table: dict, fail) -> Skill:
     return Skill(id_, path, tree)
 
 
+_REFERENCE_FORMS = "env:<NAME>, keychain:<service>[/<account>] or value:<text>"
+
+
+def _reference(value: object, label: str, fail) -> str:
+    """Validate a reference; errors name `label` (e.g. `env.TOKEN`), never the text."""
+    kind, _, rest = value.partition(":") if isinstance(value, str) else ("", "", "")
+    if kind == "env" and _ENV_NAME.fullmatch(rest):
+        return value
+    if kind == "keychain" and _KEYCHAIN.fullmatch(rest):
+        return value
+    if kind == "keychain" and rest.count("/") > 1:
+        raise fail(f"invalid reference for {label}: keychain account must not contain /")
+    if kind == "value" and rest:
+        return value
+    if kind in ("env", "keychain", "value"):
+        raise fail(f"invalid reference for {label}: expected {_REFERENCE_FORMS}")
+    raise fail(f"{label} must be env:, keychain: or value: ({_REFERENCE_FORMS})")
+
+
+def _references(table: dict, key: str, owner: str, fail) -> dict[str, str]:
+    mapping = table.get(key, {})
+    if not isinstance(mapping, dict):
+        raise fail(f"{key} of {owner!r} must be a table")
+    result = {}
+    for name, value in mapping.items():
+        if not name:
+            raise fail(f"empty {key} key in {owner!r}")
+        result[name] = _reference(value, f"{key}.{name} of {owner!r}", fail)
+    return result
+
+
+def _mcp(table: dict, fail) -> McpServer:
+    _check_keys(
+        table,
+        {"name", "transport"},
+        {"command", "args", "url", "env", "headers"},
+        "an MCP server",
+        fail,
+    )
+    name = _string(table["name"], "MCP server name", fail)
+    if not _NAME.fullmatch(name):
+        raise fail(f"invalid MCP server name {name!r}")
+    transport = table["transport"]
+    if transport not in ("stdio", "http", "sse"):
+        raise fail(f"invalid transport {transport!r} for {name!r} (stdio, http or sse)")
+    if transport == "stdio":
+        for forbidden in ("url", "headers"):
+            if forbidden in table:
+                raise fail(f"{forbidden} is not allowed on stdio server {name!r}")
+        command = _string(table.get("command"), f"command of {name!r}", fail)
+        args = table.get("args", [])
+        if not isinstance(args, list) or not all(isinstance(a, str) for a in args):
+            raise fail(f"args of {name!r} must be a list of strings")
+        url = None
+    else:
+        for forbidden in ("command", "args"):
+            if forbidden in table:
+                raise fail(f"{forbidden} is not allowed on {transport} server {name!r}")
+        url = _string(table.get("url"), f"url of {name!r}", fail)
+        command, args = None, []
+    return McpServer(
+        name,
+        transport,
+        command,
+        tuple(args),
+        url,
+        _references(table, "env", name, fail),
+        _references(table, "headers", name, fail),
+    )
+
+
 def _plugin(table: dict, fail) -> Plugin:
     id_ = _string(table["id"], "plugin id", fail)
     plugin, at, market = id_.rpartition("@")
@@ -285,6 +384,23 @@ def render(manifest: Manifest) -> str:
         lines = ["[[skill]]", f"id = {toml_string(skill.id)}", f"path = {toml_string(skill.path)}"]
         if skill.tree is not None:
             lines.append(f"tree = {toml_string(skill.tree)}")
+        blocks.append("\n".join(lines))
+    for server in sorted(manifest.mcp, key=lambda m: m.name):
+        lines = [
+            "[[mcp]]",
+            f"name = {toml_string(server.name)}",
+            f"transport = {toml_string(server.transport)}",
+        ]
+        if server.command is not None:
+            lines.append(f"command = {toml_string(server.command)}")
+        if server.args:
+            lines.append(f"args = [{', '.join(toml_string(a) for a in server.args)}]")
+        if server.url is not None:
+            lines.append(f"url = {toml_string(server.url)}")
+        for key, mapping in (("env", server.env), ("headers", server.headers)):
+            if mapping:
+                lines.append(f"[mcp.{key}]")
+                lines += [f"{toml_string(k)} = {toml_string(v)}" for k, v in mapping.items()]
         blocks.append("\n".join(lines))
     if manifest.account is not None:
         blocks.append(f"[account]\norg_uuid = {toml_string(manifest.account.org_uuid)}")

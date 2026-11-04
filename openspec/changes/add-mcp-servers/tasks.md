@@ -1,7 +1,7 @@
 ## 1. Manifest and secrets
 
-- [ ] 1.1 Extend `src/claude_sync/manifest.py` with `McpServer` per design and the `mcp-servers` spec (transport rules, references `env:`/`keychain:`/`value:` for env and headers, `${NAME}` allowed in command/args/url, unique names). Tests in `tests/test_manifest.py`: round trip; each invalid case naming the file, including the spec's "Bare value refused"; manifests without MCP tables unchanged.
-- [ ] 1.2 Create `tests/fake_security.py` (executable stub answering `find-generic-password -s <service> [-a <account>] -w` from `$HOME/.fake-keychain.json`, exit 44 with the real tool's message when absent), extend the autouse guard to block the real `security`, add a `fake_keychain` fixture. Create `src/claude_sync/secrets.py` per design. Tests in `tests/test_secrets.py`: each reference kind, missing item (exit 44) and other failures (exit 51) as errors naming the reference without the tool output, no value in any error message.
+- [x] 1.1 Extend `src/claude_sync/manifest.py` with `McpServer` per design and the `mcp-servers` spec (transport rules, references `env:`/`keychain:`/`value:` for env and headers, `${NAME}` allowed in command/args/url, unique names). Tests in `tests/test_manifest.py`: round trip; each invalid case naming the file, including the spec's "Bare value refused"; manifests without MCP tables unchanged.
+- [x] 1.2 Create `tests/fake_security.py` (executable stub answering `find-generic-password -s <service> [-a <account>] -w` from `$HOME/.fake-keychain.json`, exit 44 with the real tool's message when absent), extend the autouse guard to block the real `security`, add a `fake_keychain` fixture. Create `src/claude_sync/secrets.py` per design. Tests in `tests/test_secrets.py`: each reference kind, missing item (exit 44) and other failures (exit 51) as errors naming the reference without the tool output, no value in any error message.
 
 ## 2. MCP logic
 
