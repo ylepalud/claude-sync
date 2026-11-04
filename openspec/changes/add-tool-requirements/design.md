@@ -28,7 +28,12 @@ installing claude-sync itself.
 | Version | First `\d+(\.\d+)+` in the check output; minimum comparison by integer tuples | Full specifier grammar |
 | Check | Argument list from `shlex.split(check)`, no shell, 10 s timeout | Shell execution |
 | Upgrade | `--fix` also upgrades too-old tools | Install only |
-| Apply | Pre-check of the profile's tools before any action | Warning |
+| Apply | Pre-check in the `apply` command only, before any action | In `converge` (would also hit init and uninstall) |
+| Import | Carries the previous `[[tool]]` tables | Dropping them |
+| Paths | Managers and tools resolved with `shutil.which`, shown absolute; a still-too-old tool names the binary found first | Bare names in the output |
+| Upgrade | Idempotent upgrade-or-install per manager | `brew upgrade`/`uv tool upgrade` (fail when the manager did not install it) |
+| `check` | First word must be the tool name | Any command (arbitrary code from a pulled profile) |
+| `script:` | Single line, no control characters; never with `--yes` alone, TTY confirmation only (user decision) | `--yes` runs everything |
 
 ### Modules
 - `manifest.py`: `Tool(name, version, check, install)`, validation per
@@ -40,22 +45,25 @@ installing claude-sync itself.
   `install_command(recipe) -> list[str]`, `upgrade_command(recipe) ->
   list[str]`, `all_profiles()` (every profile directory with a
   `profile.toml`).
-- `commands/doctor.py`: read command with `--json`, and `--fix` with
-  `--dry-run`/`--yes` (the registry gives read commands `--json` only:
-  register `doctor` as `mutate` and add `--json` in `configure`, or add a
-  kind; say which in the report).
-- `converge.py`: before building any plan, check the profile's tools and
-  raise `ClaudeSyncError` listing the failures with the `doctor --fix`
-  hint.
+- `commands/doctor.py`: registered as `mutate` (so `--dry-run`/`--yes`)
+  with `--json` added in `configure`; `--fix --json` without `--yes` is a
+  usage error (exit 2); `--json` output `{"tools": [...], "conflicts":
+  [...], "ok": bool}`.
+- `commands/apply.py`: before calling `converge`, check the profile's tools
+  and raise `ClaudeSyncError` listing the failures with the `doctor --fix`
+  hint. `converge.build_manifest` copies `previous.tools`.
 
 ### Tests
 - Executable stubs for tools (`jq`, `rtk`-like) printing a configurable
   version from a JSON file in the isolated HOME, and for `brew`, `npm`,
   `uv`, `cargo` that log their argv and "install" a tool stub; the autouse
-  guard blocks the real `brew`, `npm`, `uv` and `cargo` (and `sh` scripts
-  run only in tests through the stubs). The real `uv` is used by the test
-  runner itself: block it only inside the PATH given to commands under
-  test, not for the test process.
+  guard blocks the real `brew`, `npm`, `uv` and `cargo` for code under
+  test by putting blocking stubs first on the PATH (the test runner,
+  already started by `uv run`, is not affected); managers are always
+  invoked by name through that PATH, never by a hard-coded path. Tool stubs
+  use unique names (`fakejq`, `faketool`) so a real binary such as
+  `/usr/bin/jq` can never satisfy a "missing" test. Scripts in tests are
+  harmless shell lines writing into the isolated HOME.
 
 ## Risks / Trade-offs
 
