@@ -16,6 +16,9 @@ FAKE_SYSTEM = {
     "launchctl": Path(__file__).with_name("fake_launchctl.py"),
 }
 FAKE_SECURITY = Path(__file__).with_name("fake_security.py")
+FAKE_TOOL = Path(__file__).with_name("fake_tool.py")
+FAKE_MANAGER = Path(__file__).with_name("fake_manager.py")
+MANAGERS = ("brew", "npm", "uv", "cargo")
 
 
 @pytest.fixture(autouse=True)
@@ -67,6 +70,19 @@ def block_real_claude(request, tmp_path_factory, monkeypatch):
         return
     script = '#!/bin/sh\necho "real claude blocked in tests" >&2\nexit 1\n'
     _install_command(tmp_path_factory.mktemp("blocked-bin"), script, monkeypatch)
+
+
+@pytest.fixture(autouse=True)
+def block_real_managers(tmp_path_factory, monkeypatch):
+    """Put a `brew`, `npm`, `uv` and `cargo` that refuse to run first on PATH.
+
+    The test runner, already started by `uv run`, is not affected; code under
+    test always calls managers by name through PATH.
+    """
+    bin_dir = tmp_path_factory.mktemp("blocked-managers-bin")
+    for name in MANAGERS:
+        script = f'#!/bin/sh\necho "real {name} blocked in tests" >&2\nexit 2\n'
+        _install_command(bin_dir, script, monkeypatch, name)
 
 
 @dataclass
@@ -180,6 +196,107 @@ def fake_keychain(block_real_system, isolated_environment, tmp_path_factory, mon
     for name in ("FAKE_SECURITY_EXIT", "FAKE_SECURITY_RAW"):
         monkeypatch.delenv(name, raising=False)
     return FakeKeychain(isolated_environment)
+
+
+@dataclass
+class FakeTools:
+    home: Path
+    bin_dir: Path
+
+    def _config(self) -> dict:
+        file = self.home / ".fake-tools.json"
+        return json.loads(file.read_text()) if file.exists() else {}
+
+    def install(
+        self,
+        name: str,
+        output: str,
+        *,
+        exit: int = 0,
+        sleep: float = 0,
+        read_stdin: bool = False,
+        requires_arg: str | None = None,
+    ) -> Path:
+        """Put an executable `name` on PATH printing `output` (and exiting `exit`)."""
+        config = self._config()
+        config[name] = {"output": output, "exit": exit, "sleep": sleep, "read_stdin": read_stdin}
+        if requires_arg is not None:
+            config[name]["requires_arg"] = requires_arg
+        (self.home / ".fake-tools.json").write_text(json.dumps(config))
+        wrapper = self.bin_dir / name
+        wrapper.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{FAKE_TOOL}" "{name}" "$@"\n')
+        wrapper.chmod(0o755)
+        return wrapper
+
+    def forget(self, name: str) -> None:
+        """Keep the executable but drop its configuration: it exits 127."""
+        config = self._config()
+        del config[name]
+        (self.home / ".fake-tools.json").write_text(json.dumps(config))
+
+    def remove(self, name: str) -> None:
+        (self.bin_dir / name).unlink()
+
+    def path(self, name: str) -> str | None:
+        found = self.bin_dir / name
+        return str(found) if found.exists() else None
+
+
+@pytest.fixture
+def fake_tools(isolated_environment, tmp_path_factory, monkeypatch):
+    """A directory on PATH for tool stubs; use unique names such as `fakejq`."""
+    bin_dir = tmp_path_factory.mktemp("fake-tools-bin")
+    monkeypatch.setenv("FAKE_TOOLS_BIN", str(bin_dir))
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    return FakeTools(isolated_environment, bin_dir)
+
+
+@dataclass
+class FakeManagers:
+    home: Path
+
+    def _config(self) -> dict:
+        file = self.home / ".fake-managers.json"
+        return json.loads(file.read_text()) if file.exists() else {}
+
+    def _save(self, config: dict) -> None:
+        (self.home / ".fake-managers.json").write_text(json.dumps(config))
+
+    def provides(self, manager: str, package: str, *, tool: str, output: str) -> None:
+        """Installing `package` with `manager` makes `tool` present, printing `output`."""
+        config = self._config()
+        config.setdefault("packages", {})[f"{manager}:{package}"] = {"tool": tool, "output": output}
+        self._save(config)
+
+    def listed(self, *formulas: str) -> None:
+        """`brew list <formula>` succeeds for these formulas."""
+        config = self._config()
+        config.setdefault("listed", []).extend(formulas)
+        self._save(config)
+
+    def fail(self, manager: str, package: str) -> None:
+        config = self._config()
+        config.setdefault("failing", []).append(f"{manager}:{package}")
+        self._save(config)
+
+    def calls(self) -> list[list[str]]:
+        """Every manager call, in order, manager name first."""
+        file = self.home / ".fake-managers.log"
+        if not file.exists():
+            return []
+        return [json.loads(line)["argv"] for line in file.read_text().splitlines()]
+
+
+@pytest.fixture
+def fake_managers(
+    block_real_managers, fake_tools, isolated_environment, tmp_path_factory, monkeypatch
+):
+    """Install tests/fake_manager.py as `brew`, `npm`, `uv` and `cargo` ahead of the guard."""
+    bin_dir = tmp_path_factory.mktemp("fake-managers-bin")
+    for name in MANAGERS:
+        script = f'#!/bin/sh\nexec "{sys.executable}" "{FAKE_MANAGER}" "{name}" "$@"\n'
+        _install_command(bin_dir, script, monkeypatch, name)
+    return FakeManagers(isolated_environment)
 
 
 LEGACY_GITIGNORE = """\

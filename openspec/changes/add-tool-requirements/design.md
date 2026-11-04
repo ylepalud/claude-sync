@@ -42,9 +42,10 @@ installing claude-sync itself.
   `check(tool) -> ToolStatus(name, status, installed, required)` (runs the
   check command via `subprocess.run` with `timeout=10`),
   `merge(manifests_by_profile) -> (requirements, conflicts)`,
-  `install_command(recipe) -> list[str]`, `upgrade_command(recipe) ->
-  list[str]`, `all_profiles()` (every profile directory with a
-  `profile.toml`).
+  `fix_command(recipe) -> list[str]` (one install-or-upgrade command per
+  recipe, managers as absolute paths, brew choosing install or upgrade from
+  `brew list`), `resolved_path(name)`, `all_profiles()` (every profile
+  directory with a `profile.toml`).
 - `commands/doctor.py`: registered as `mutate` (so `--dry-run`/`--yes`)
   with `--json` added in `configure`; `--fix --json` without `--yes` is a
   usage error (exit 2); `--json` output `{"tools": [...], "conflicts":
