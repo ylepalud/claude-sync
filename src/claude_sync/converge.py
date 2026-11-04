@@ -141,16 +141,31 @@ def _managed_source(source: str) -> str:
     return f"path:{paths.display(rest)}" if kind == "path" else source
 
 
+def state_dir_of(config_dir: Path) -> Path:
+    """The directory holding the `.claude.json` of the configuration `config_dir`.
+
+    Without CLAUDE_CONFIG_DIR Claude Code keeps it in the home directory, next
+    to `~/.claude` rather than inside; any other directory holds its own.
+    """
+    home = Path.home()
+    return home if paths.key(config_dir) == paths.key(home / ".claude") else config_dir
+
+
 def build_manifest(
     config_dir: Path,
     account: manifest.Account | None,
     cli: ClaudeCli | None = None,
     previous: manifest.Manifest | None = None,
 ) -> manifest.Manifest:
-    """The manifest of the plugins, managed marketplaces and external skills of `config_dir`.
+    """The manifest of the plugins, managed marketplaces, external skills and
+    user-scope MCP servers of `config_dir`.
 
     `previous` is the manifest being replaced, if any: the skill import keeps
-    its refs and trees (`skills.import_skills`).
+    its refs and trees (`skills.import_skills`) and the MCP import its
+    references (`mcp.import_servers`). The MCP servers are read in the
+    `.claude.json` of `state_dir_of(config_dir)`. The
+    environment variables to export for the references the import made are
+    listed on stderr (names only).
 
     `cli` runs the `claude` commands (default: `ClaudeCli(config_dir)`); init
     passes `ClaudeCli(None)` to read `~/.claude` with CLAUDE_CONFIG_DIR unset.
@@ -179,4 +194,11 @@ def build_manifest(
         if p.id.rpartition("@")[2] in names
     ]
     sources, linked = skills_mod.import_skills(config_dir, previous)
-    return manifest.Manifest(tuple(markets), tuple(plugins), account, sources, linked)
+    servers, exports = mcp_mod.import_servers(state_dir_of(config_dir), previous)
+    if exports:
+        print(
+            "claude-sync: export these variables before running apply:\n"
+            + "\n".join(f"  {name}" for name in exports),
+            file=sys.stderr,
+        )
+    return manifest.Manifest(tuple(markets), tuple(plugins), account, sources, linked, servers)

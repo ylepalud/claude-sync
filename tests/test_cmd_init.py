@@ -548,16 +548,21 @@ def test_init_declares_the_skills_but_leaves_their_links_and_clones_nothing(
     assert not (paths.config_home() / "sources").exists()
 
 
-def test_init_converges_without_mcp_servers(
-    capsys, monkeypatch, legacy, fake_system, reset_on_cache_removal
+def test_init_declares_the_mcp_servers_but_leaves_them_untouched(
+    capsys, legacy, fake_system, reset_on_cache_removal
 ):
-    seen = []
-    real = converge.converge
-
-    def spy(*args, **kwargs):
-        seen.append(kwargs)
-        return real(*args, **kwargs)
-
-    monkeypatch.setattr(converge, "converge", spy)
-    assert run(capsys, "init", "--yes")[0] == 0
-    assert [(k["skills"], k["mcp"]) for k in seen] == [(False, False)]
+    secret = "s3cr3t-literal"
+    servers = {
+        "tools": {"type": "stdio", "command": "uvx", "args": ["srv"], "env": {"API_KEY": secret}}
+    }
+    (legacy.home / ".claude.json").write_text(json.dumps({"numStartups": 3, "mcpServers": servers}))
+    code, out, err = run(capsys, "init", "--yes")
+    assert code == 0
+    profile = paths.profile_dir("perso")
+    declared = manifest.load(profile / manifest.MANIFEST_FILE)
+    assert [(s.name, s.env) for s in declared.mcp] == [("tools", {"API_KEY": "env:TOOLS_API_KEY"})]
+    assert secret not in (profile / manifest.MANIFEST_FILE).read_text() + out + err
+    assert "TOOLS_API_KEY" in err
+    assert json.loads((profile / ".claude.json").read_text())["mcpServers"] == servers
+    argv = legacy.fake_claude.calls(profile)
+    assert argv and not [a for a in argv if a[0] == "mcp"]

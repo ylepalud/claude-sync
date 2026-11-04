@@ -332,3 +332,145 @@ def test_apply_then_import_then_status_is_stable(capsys, fake_claude, skills_ups
     assert run(capsys, "import", "--profile", "perso", "--yes")[0] == 0
     assert file.read_text() == before
     assert run(capsys, "status", "--profile", "perso")[0] == 0
+
+
+# MCP servers
+
+SECRET = "s3cr3t-literal"
+
+
+def write_servers(directory, servers):
+    import json
+
+    (directory / ".claude.json").write_text(json.dumps({"mcpServers": servers}))
+
+
+def test_a_literal_becomes_a_reference_and_the_export_is_listed_without_the_value(capsys, source):
+    directory, _ = source
+    write_servers(
+        directory,
+        {"tools": {"type": "stdio", "command": "uvx", "args": ["srv"], "env": {"API_KEY": SECRET}}},
+    )
+    code, out, err = run(capsys, "import", "--source", str(directory), "--output", "-")
+    assert code == 0
+    assert '"API_KEY" = "env:TOOLS_API_KEY"' in out
+    assert "TOOLS_API_KEY" in err
+    assert SECRET not in out + err
+
+
+def test_a_composite_placeholder_is_imported_as_a_value_reference(capsys, source):
+    directory, _ = source
+    write_servers(
+        directory,
+        {
+            "remote": {
+                "type": "http",
+                "url": "https://example.test/mcp",
+                "headers": {"Authorization": "Bearer ${T}"},
+            }
+        },
+    )
+    code, out, err = run(capsys, "import", "--source", str(directory), "--output", "-")
+    assert code == 0
+    assert '"Authorization" = "value:Bearer ${T}"' in out
+    assert "export" not in err.lower()
+
+
+def test_import_to_the_profile_writes_no_value_and_keeps_the_previous_references(
+    capsys, source, tmp_path
+):
+    directory, _ = source
+    write_servers(
+        directory,
+        {"tools": {"type": "stdio", "command": "uvx", "env": {"API_KEY": SECRET}}},
+    )
+    target_file = tmp_path / "out.toml"
+    code, out, err = run(
+        capsys, "import", "--source", str(directory), "--output", str(target_file), "--yes"
+    )
+    assert code == 0
+    assert SECRET not in target_file.read_text() + out + err
+    assert '"API_KEY" = "env:TOOLS_API_KEY"' in target_file.read_text()
+    # A second import with the written manifest as previous keeps the reference.
+    code, out, err = run(
+        capsys, "import", "--source", str(directory), "--output", str(target_file), "--yes"
+    )
+    assert code == 0 and SECRET not in target_file.read_text() + out + err
+
+
+def test_mcp_servers_import_apply_import_then_status_is_stable(capsys, source, fake_claude):
+    directory, _ = source
+    profile = paths.profile_dir("perso")
+    fake_claude.seed(profile, fake_claude.state(directory))
+    write_servers(
+        profile,
+        {
+            "tools": {"type": "stdio", "command": "uvx", "args": [], "env": {"A": "${A_VAR}"}},
+            "remote": {
+                "type": "http",
+                "url": "https://example.test/mcp",
+                "headers": {"Authorization": "Bearer ${T}"},
+            },
+        },
+    )
+    assert run(capsys, "import", "--profile", "perso", "--yes")[0] == 0
+    first = (profile / manifest.MANIFEST_FILE).read_text()
+    assert run(capsys, "status", "--profile", "perso")[0] == 0
+    assert run(capsys, "apply", "--profile", "perso", "--yes")[0] == 0
+    assert run(capsys, "import", "--profile", "perso", "--yes")[0] == 0
+    assert (profile / manifest.MANIFEST_FILE).read_text() == first
+    assert run(capsys, "status", "--profile", "perso")[0] == 0
+
+
+def test_import_help_mentions_mcp_servers_and_their_references():
+    from claude_sync import registry
+
+    command = next(c for c in registry.COMMANDS if c.name == "import")
+    for word in ("MCP", "env:", "value:", "keychain:", "standard error", "~/.claude.json"):
+        assert word in command.description
+
+
+def test_previous_references_are_kept_at_the_command_level(
+    capsys, source, tmp_path, fake_keychain, monkeypatch
+):
+    directory, _ = source
+    fake_keychain.set("svc", SECRET)
+    monkeypatch.setenv("OTHER", "unused")
+    write_servers(
+        directory,
+        {
+            "tools": {
+                "type": "stdio",
+                "command": "uvx",
+                "env": {"A": SECRET, "B": "${OTHER}"},
+            }
+        },
+    )
+    target_file = tmp_path / "out.toml"
+    target_file.write_text(
+        '[[mcp]]\nname = "tools"\ntransport = "stdio"\ncommand = "uvx"\n'
+        '[mcp.env]\n"A" = "keychain:svc"\n"B" = "env:OTHER"\n'
+    )
+    code, out, err = run(
+        capsys, "import", "--source", str(directory), "--output", str(target_file), "--yes"
+    )
+    assert code == 0
+    written = target_file.read_text()
+    assert '"A" = "keychain:svc"' in written and '"B" = "env:OTHER"' in written
+    assert "export" not in err.lower() and SECRET not in written + out + err
+
+
+def test_source_dot_claude_reads_the_servers_of_home_dot_claude_json(
+    capsys, fake_claude, isolated_environment
+):
+    root = isolated_environment / ".claude"
+    root.mkdir()
+    fake_claude.seed(root, {})
+    write_servers(
+        isolated_environment,
+        {"tools": {"type": "stdio", "command": "uvx", "env": {"API_KEY": SECRET}}},
+    )
+    code, out, err = run(capsys, "import", "--source", "~/.claude", "--output", "-")
+    assert code == 0
+    assert '"API_KEY" = "env:TOOLS_API_KEY"' in out
+    assert SECRET not in out + err

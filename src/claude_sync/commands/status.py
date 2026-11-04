@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import asdict
 
-from claude_sync import manifest, skills, sync, target
+from claude_sync import manifest, mcp, skills, sync, target
 from claude_sync.claude_cli import ClaudeCli
 from claude_sync.context import Context
 from claude_sync.exit_codes import ExitCode
@@ -26,8 +26,10 @@ def _line(difference: sync.Difference) -> str:
 def differences_of(profile: target.Target) -> list[sync.Difference]:
     declared = manifest.load(profile.directory / manifest.MANIFEST_FILE)
     observed = sync.observe(ClaudeCli(profile.directory), profile.directory)
-    return sync.diff(declared, observed) + skills.diff(
-        declared, skills.observe(profile.directory, declared)
+    return (
+        sync.diff(declared, observed)
+        + skills.diff(declared, skills.observe(profile.directory, declared))
+        + mcp.diff(declared, mcp.observe(profile.directory))
     )
 
 
@@ -59,8 +61,14 @@ COMMAND = Command(
         "Skills are compared too: a skill without its link, a link pointing\n"
         "elsewhere (run claude-sync apply), an unlisted link into the sources\n"
         "directory, a missing or dirty clone, another commit, ref or tree.\n"
-        "Marketplaces and skill sources without a recorded commit and unmanaged\n"
-        "marketplaces are listed as information, not drift.\n"
+        "User-scope MCP servers are compared too: a declared server missing,\n"
+        "an unlisted one, a server whose configuration differs (the differing\n"
+        "field paths such as headers.Authorization are named, never a value of\n"
+        "env or headers), and a keychain: reference that does not resolve. env:,\n"
+        "keychain: and value: references are compared by what they resolve to.\n"
+        "Marketplaces and skill sources without a recorded commit, unmanaged\n"
+        "marketplaces and MCP servers with fields claude-sync does not model are\n"
+        "listed as information, not drift.\n"
         "\n"
         "The profile is --profile NAME, else the profile of the current directory;\n"
         "its directory must exist (claude-sync profile create NAME)."
@@ -68,7 +76,10 @@ COMMAND = Command(
     examples=[
         ("claude-sync status", "check the profile of the current directory"),
         ("claude-sync status --profile work", "check the work profile"),
-        ("claude-sync status --profile work --json", "print one JSON document, skills included"),
+        (
+            "claude-sync status --profile work --json",
+            "print one JSON document, skills and MCP servers included",
+        ),
     ],
     exit_codes=[ExitCode.OK, ExitCode.ERROR, ExitCode.USAGE, ExitCode.DRIFT],
     kind="read",

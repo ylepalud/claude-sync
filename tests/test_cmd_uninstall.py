@@ -630,16 +630,30 @@ def test_uninstall_never_clones_or_relinks_declared_skills(
 
 
 def test_uninstall_leaves_mcp_servers_alone(capsys, migrated, fake_keychain):
+    import json
+
     from claude_sync import manifest
 
-    file = paths.profile_dir("perso") / manifest.MANIFEST_FILE
+    profile = paths.profile_dir("perso")
+    file = profile / manifest.MANIFEST_FILE
     file.write_text(
         file.read_text()
         + '\n[[mcp]]\nname = "remote"\ntransport = "http"\nurl = "https://example.test/mcp"\n'
         + '[mcp.headers]\nAuthorization = "keychain:svc-x"\n'
+        + '\n[[mcp]]\nname = "added"\ntransport = "stdio"\ncommand = "uvx"\n'
     )
+    # One declared server that differs (replace), one declared and absent (add), one unlisted
+    # (prune): none of them may be touched.
+    servers = {
+        "remote": {"type": "http", "url": "https://elsewhere.test/mcp"},
+        "extra": {"type": "stdio", "command": "x"},
+    }
+    state = profile / ".claude.json"
+    data = json.loads(state.read_text())
+    state.write_text(json.dumps({**data, "mcpServers": servers}))
     code, _, _ = run(capsys, "uninstall", "--yes")
     assert code == 0
     argv = [e["argv"] for e in migrated.fake_claude.log(migrated.root)]
-    assert not [a for a in argv if a[0] == "mcp"]
+    assert argv and not [a for a in argv if a[0] == "mcp"]
+    assert json.loads((migrated.root.parent / ".claude.json").read_text())["mcpServers"] == servers
     assert fake_keychain.calls() == []
