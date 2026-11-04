@@ -197,7 +197,7 @@ def build_manifest(
     servers, exports = mcp_mod.import_servers(state_dir_of(config_dir), previous)
     if exports:
         print(
-            "claude-sync: export these variables before running apply:\n"
+            "claude-sync: export these variables in the shell that starts Claude Code:\n"
             + "\n".join(f"  {name}" for name in exports),
             file=sys.stderr,
         )

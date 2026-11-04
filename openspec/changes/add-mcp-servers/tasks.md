@@ -17,4 +17,4 @@
 
 ## 4. Documentation
 
-- [ ] 4.1 README: an "MCP servers" section (table, reference kinds and where each value ends up, placeholders expanded by Claude Code at run time, import of literals into `env:` references with the export list, replacement and OAuth loss, prune, init/uninstall leave servers alone, values never printed) and roadmap 5b done.
+- [x] 4.1 README: an "MCP servers" section (table, reference kinds and where each value ends up, placeholders expanded by Claude Code at run time, import of literals into `env:` references with the export list, replacement and OAuth loss, prune, init/uninstall leave servers alone, values never printed) and roadmap 5b done.
