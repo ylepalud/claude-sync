@@ -388,6 +388,11 @@ HTTP = '[[mcp]]\nname = "t"\ntransport = "http"\nurl = "https://x"\n'
         (STDIO + 'url = "https://x"\n', "url"),
         (STDIO + 'headers = { A = "env:A" }\n', "headers"),
         (HTTP + 'command = "x"\n', "command"),
+        (HTTP + 'env = { A = "env:A" }\n', "env is not allowed on http server 't'"),
+        (
+            HTTP.replace('"http"', '"sse"') + 'env = { A = "env:A" }\n',
+            "env is not allowed on sse server 't'",
+        ),
         (HTTP + 'args = ["a"]\n', "args"),
         (STDIO + 'args = "a"\n', "args"),
         (STDIO + "args = [1]\n", "args"),

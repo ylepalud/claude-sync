@@ -12,7 +12,7 @@ from claude_sync.manifest import Manifest, Plugin, source_spec
 _MANAGED = {"github": "github", "git": "git", "url": "url", "directory": "path"}
 
 # Difference kinds that are information, not drift.
-INFORMATION = frozenset({"unpinned", "unmanaged", "skill-unpinned"})
+INFORMATION = frozenset({"unpinned", "unmanaged", "skill-unpinned", "mcp-unmanaged"})
 
 
 @dataclass(frozen=True)

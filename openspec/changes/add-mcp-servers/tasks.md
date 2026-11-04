@@ -5,8 +5,8 @@
 
 ## 2. MCP logic
 
-- [ ] 2.1 Teach `tests/fake_claude.py` `mcp add-json` and `mcp remove` per design (with tests in `tests/test_fake_claude.py` or the existing claude CLI tests).
-- [ ] 2.2 Create `src/claude_sync/mcp.py` with `observe`, `desired`, `diff`, `plan`, `import_servers` per design. Tests in `tests/test_mcp.py`: observe defaults and aliases; desired for env/value/keychain; each difference kind with field paths and no value in the output; plan adds, replaces (confirm only for http/sse), prunes (confirm), masks secrets in descriptions; import turns literals into `env:<SERVER>_<KEY>`, keeps `${NAME}` as `env:NAME`, keeps previous references that still produce the observed value (keychain included), and returns the exports list.
+- [x] 2.1 Teach `tests/fake_claude.py` `mcp add-json` and `mcp remove` per design (with tests in `tests/test_fake_claude.py` or the existing claude CLI tests).
+- [x] 2.2 Create `src/claude_sync/mcp.py` with `observe`, `desired`, `diff`, `plan`, `import_servers` per design. Tests in `tests/test_mcp.py`: observe defaults and aliases; desired for env/value/keychain; each difference kind with field paths and no value in the output; plan adds, replaces (confirm only for http/sse), prunes (confirm), masks secrets in descriptions; import turns literals into `env:<SERVER>_<KEY>`, keeps `${NAME}` as `env:NAME`, keeps previous references that still produce the observed value (keychain included), and returns the exports list.
 
 ## 3. Commands
 

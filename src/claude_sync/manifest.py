@@ -307,7 +307,7 @@ def _mcp(table: dict, fail) -> McpServer:
             raise fail(f"args of {name!r} must be a list of strings")
         url = None
     else:
-        for forbidden in ("command", "args"):
+        for forbidden in ("command", "args", "env"):
             if forbidden in table:
                 raise fail(f"{forbidden} is not allowed on {transport} server {name!r}")
         url = _string(table.get("url"), f"url of {name!r}", fail)
