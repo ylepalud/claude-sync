@@ -11,9 +11,10 @@ profile records what is installed, at which version.
 Status: under construction. The CLI frame, the leak guard, profile
 resolution, the zsh integration, `profile create`, the manifest commands
 (`import`, `status`, `apply`), the migration of an existing `~/.claude`
-into a profile (`init`, `uninstall`, `adopt`) and external skill sources
-(step 5a) exist today. MCP servers (5b) and machine tools (5c) come next;
-see the roadmap below and `openspec/changes/` for the planned work.
+into a profile (`init`, `uninstall`, `adopt`), external skill sources
+(step 5a) and user-scope MCP servers (step 5b) exist today. Machine tools
+(5c) come next; see the roadmap below and `openspec/changes/` for the
+planned work.
 
 ## Install
 
@@ -149,9 +150,9 @@ honours too. Open shells keep the mappings they were started with until
 
 ## Manifest
 
-Each profile declares its marketplaces and user-scope plugins, and its
-external skills (see Skills), in `profile.toml`, at the root of the profile
-directory:
+Each profile declares its marketplaces and user-scope plugins, its
+external skills (see Skills) and its user-scope MCP servers (see MCP
+servers), in `profile.toml`, at the root of the profile directory:
 
 ```toml
 [[marketplace]]
@@ -381,6 +382,165 @@ link elsewhere, no clone. claude-sync never modifies or removes anything in
 `~/.agents`; once no profile links into it, remove it with the tool that
 installed it. `init` and `uninstall` leave skills alone (see Migration).
 
+## MCP servers
+
+A profile's user-scope MCP servers, the `mcpServers` of its `.claude.json`
+(what `claude mcp add --scope user` writes), are declared in `profile.toml`.
+Secrets stay out of the manifest: each value of `env` and `headers` is a
+reference.
+
+```toml
+[[mcp]]
+name = "docs"
+transport = "http"
+url = "https://docs.example.invalid/mcp"
+[mcp.headers]
+"Authorization" = "value:Bearer ${DOCS_TOKEN}"
+
+[[mcp]]
+name = "tools"
+transport = "stdio"
+command = "npx"
+args = ["-y", "example-tools-mcp"]
+[mcp.env]
+"TOOLS_API_KEY" = "keychain:tools-api/perso"
+"TOOLS_MODE" = "value:fast"
+"TOOLS_TOKEN" = "env:TOOLS_TOKEN"
+```
+
+- `name` matches `[A-Za-z0-9][A-Za-z0-9._-]*`; `transport` is `stdio`,
+  `http` or `sse`.
+- A `stdio` server has a `command`, and optionally `args` (a list of
+  strings) and `env`. An `http` or `sse` server has a `url`, and optionally
+  `headers`. A key of the other transport is an error.
+- `command`, `args` and `url` are literal: written, compared and printed as
+  they are. Keep secrets out of them.
+- Unknown keys, missing fields, duplicate names and invalid references are
+  errors that name the file and the key, never the reference's text.
+
+### References
+
+Each value of `env` and `headers` is one of three references, and each ends
+up in a different place:
+
+- `env:NAME` (`NAME` matches `[A-Za-z_][A-Za-z0-9_]*`) is written to
+  `.claude.json` as the placeholder `${NAME}`. Claude Code expands it from
+  its own environment each time it starts the server, so the value is never
+  on disk: not in `profile.toml`, not in `.claude.json`. Export the variable
+  in the environment Claude Code starts in. When it is unset, the server
+  gets the literal text `${NAME}` (and fails to authenticate) and `claude
+  mcp list` warns; `status` cannot see the environment of future sessions,
+  so it does not report it.
+- `keychain:SERVICE` or `keychain:SERVICE/ACCOUNT` (neither part contains
+  `/`) is read by `apply` with `security find-generic-password -s SERVICE
+  [-a ACCOUNT] -w`, final newline removed, and written as the value: since
+  Claude Code does not read the Keychain, the value sits in clear in the
+  profile's `.claude.json`. Claude Code writes that file with mode 600, and
+  the `.gitignore` of `profile create` keeps it out of git (check your own
+  `.gitignore` in a profile `init` migrated). A missing item stops `apply`
+  with exit 1 before any change, naming the reference.
+- `value:TEXT` is literal: `TEXT` is written as it is, and it sits in
+  `profile.toml`, so in git. It may hold placeholders Claude Code expands,
+  `${NAME}` or `${NAME:-default}`: `value:Bearer ${DOCS_TOKEN}` keeps the
+  token out of the manifest, but its literal part, `Bearer `, is in
+  `profile.toml`. Never put a secret in a `value:`.
+
+Reading a Keychain item has two side effects. On the first read, macOS may
+open a dialog asking to allow `security` access to the item: a window, not
+a terminal prompt, so `--yes` does not answer it. `status` and
+`apply --dry-run` read the items too, to compare. And while `claude mcp
+add-json` runs, the resolved value is one of its arguments, visible to `ps`
+for that instant.
+
+### Import
+
+`import` (see Manifest) also records the servers. With `--source ~/.claude`
+they are read in `~/.claude.json`, where Claude Code keeps them without
+`CLAUDE_CONFIG_DIR`; for any other directory, and for a profile, in the
+`.claude.json` inside it. `command`, `args` and `url` are kept as they are,
+and each value of `env` or `headers` becomes a reference:
+
+- a value that is exactly `${NAME}` becomes `env:NAME`;
+- a value holding another placeholder (`Bearer ${T}`, `${MODE:-fast}`)
+  becomes `value:` with the same text;
+- any other value, a literal and possibly a secret, becomes
+  `env:<SERVER>_<KEY>`, in upper case with every other character than a
+  letter or digit as `_`: the key `API_KEY` of `tools` gives
+  `env:TOOLS_API_KEY`. The value is neither written nor printed; the
+  variables to export are listed on standard error:
+
+  ```text
+  claude-sync: export these variables in the shell that starts Claude Code:
+    TOOLS_API_KEY
+  ```
+
+The literal stays in `.claude.json` until `apply`: `status` reports the key
+as changed (`mcp-changed tools: ... found 'env.API_KEY'`), and `apply`
+replaces the server with `${TOOLS_API_KEY}`, which removes the literal from
+the file. Before that, save the value elsewhere and export it, or edit the
+reference to a `keychain:` one holding the same value: `status` then has
+nothing to report. A later `import` keeps a reference of the manifest being
+replaced, for the same server, table and key, while it resolves to the
+observed value; a `keychain:` one that does not resolve is kept with a
+warning.
+
+The whole import stops with exit 1, naming the servers and keys, when a
+made variable would start with a digit (rename the server), when two keys,
+of one server or of two, would make the same variable, or when a made
+variable is also used by another key of the same server. A server the
+manifest rules reject (an invalid name, an empty `command` or `url`) is left
+out with a warning.
+
+### Unmanaged servers
+
+A missing `type` is read as `stdio`, and `streamable-http` as `http`. A
+server claude-sync cannot record is unmanaged: an unknown field, a field of
+another shape than the manifest gives, another `type`, or a missing
+`command` or `url`. `import` leaves it out with a warning naming those
+fields, `status` lists it as information (`mcp-unmanaged`), and `apply`
+never replaces or removes it. When the manifest declares a server of that
+name, `status` reports drift and `apply` stops with exit 1 before any
+change: remove the server with `claude mcp remove <name> -s user`, or drop
+it from the manifest.
+
+### Status and apply
+
+`status` also reports a declared server that is missing (`mcp-missing`), a
+server the manifest does not list (`mcp-unlisted`), a server that differs
+(`mcp-changed`, naming the differing fields such as `url` or
+`headers.Authorization`) and a reference that does not resolve
+(`mcp-secret`). References are compared by what they resolve to: `env:` as
+its placeholder text, `keychain:` as the item's value.
+
+`apply` converges the servers after the skills, with `claude mcp add-json
+<name> <json> --scope user` and `claude mcp remove <name> -s user`. Every
+reference is resolved before any change, to plugins and skills too. A
+missing server is added. A server that differs is removed, then added
+again:
+
+- removing an `http` or `sse` server deletes its OAuth tokens and client
+  registration, so its replacement is listed in the confirmation
+  (`removes an http server: drops its OAuth sign-in`); sign in to it again
+  afterwards;
+- a `stdio` server is replaced without confirmation.
+
+The replacement is not atomic: when the add fails after the remove, the
+server is gone, and the error says to run `apply` again. `--prune` also
+removes, after the confirmation, the servers the manifest does not list,
+never an unmanaged one; without it, unlisted servers stay.
+
+Values of `env` and `headers` are never printed. `status` names field
+paths only; the dry run, the confirmation and the error of a failing
+command show each value, placeholders included, as `***`, and the output of
+a failing command is scrubbed of the resolved values. `command`, `args` and
+`url` are shown as they are.
+
+`init` records the servers of `~/.claude.json` in `profile.toml`, listing
+the variables to export, and moves the file with the servers as they are;
+its `apply` leaves them alone, so imported literals stay until you run
+`claude-sync apply`. `uninstall` moves `.claude.json` back with the servers
+as they are and runs no `claude mcp` command.
+
 ## Migration
 
 `init` moves an existing `~/.claude` and `~/.claude.json` into the default
@@ -418,8 +578,9 @@ Once confirmed, it runs, in order:
    `~/.config/claude-sync/backups/<UTC timestamp>.tar.gz` (gzip tar, mode
    600, symbolic links stored as links, sockets and FIFOs skipped and
    named). Backups are never deleted for you.
-2. Read the installed plugins and marketplaces, and the skill links (see
-   Skills), for `profile.toml`.
+2. Read the installed plugins and marketplaces, the skill links (see
+   Skills) and the MCP servers of `~/.claude.json` (see MCP servers), for
+   `profile.toml`.
 3. Rename `~/.claude` to `~/.config/claude-sync/profiles/<default>/`.
 4. Write the migration record `.claude-sync-migration.json` in the profile,
    updated after each later step. `uninstall` works from it; it is not
@@ -454,8 +615,8 @@ Once confirmed, it runs, in order:
     `plugins/marketplaces`, `installed_plugins.json`,
     `known_marketplaces.json`; `plugins/data` stays), write `profile.toml`
     and run `claude-sync apply`, which installs them again (network). This
-    apply converges plugins only: skill links stay as they are and no
-    source is cloned until you run `claude-sync apply` yourself.
+    apply converges plugins only: skill links and MCP servers stay as they
+    are and no source is cloned until you run `claude-sync apply` yourself.
 12. List the Markdown files that still name `~/.claude` (`projects/`,
     `plugins/` and `.git` are not searched). They are never rewritten: fix
     them by hand.
@@ -496,7 +657,8 @@ with `CLAUDE_CONFIG_DIR` unset (network), which installs the current
 upstream versions, and deletes `profile.toml`. A failing rebuild is a
 warning (exit 4) and keeps `profile.toml`: install the plugins it lists
 with `claude plugin install`. Skills are never cloned or relinked: the
-skill links keep their targets. Other profiles, `config.toml`, the skill
+skill links keep their targets. MCP servers stay as they are in
+`.claude.json`. Other profiles, `config.toml`, the skill
 sources and the backups stay.
 
 A failure before the profile is moved back can be retried with
@@ -595,7 +757,7 @@ scripts/check-denylist --tree --history
 5. What the profile's git repository cannot carry (`settings.json` and the
    profile's own skills stay in git):
    - [x] 5a. External skill sources.
-   - [ ] 5b. MCP servers.
+   - [x] 5b. MCP servers.
    - [ ] 5c. Machine `[tools]`.
 
 ## License

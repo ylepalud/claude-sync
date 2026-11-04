@@ -101,3 +101,25 @@ def test_fake_system_replaces_the_guard(fake_system, monkeypatch):
         ["launchctl", "list"],
     ]
     assert fake_system.log_file == Path(os.environ["HOME"]) / ".fake-system.log"
+
+
+def test_real_security_is_blocked():
+    result = subprocess.run(
+        ["security", "find-generic-password", "-s", "x", "-w"], capture_output=True, text=True
+    )
+    assert result.returncode == 2
+    assert "real security blocked in tests" in result.stderr
+
+
+def test_fake_keychain_replaces_the_guard(fake_keychain):
+    fake_keychain.set("svc", "one")
+    fake_keychain.set("svc", "two", account="acct")
+    run = lambda *args: subprocess.run(  # noqa: E731
+        ["security", "find-generic-password", *args, "-w"], capture_output=True, text=True
+    )
+    assert (run("-s", "svc").returncode, run("-s", "svc").stdout) == (0, "one\n")
+    assert run("-s", "svc", "-a", "acct").stdout == "two\n"
+    missing = run("-s", "nope")
+    assert missing.returncode == 44
+    assert "could not be found in the keychain" in missing.stderr
+    assert fake_keychain.calls()[0] == ["find-generic-password", "-s", "svc", "-w"]

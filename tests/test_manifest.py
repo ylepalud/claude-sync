@@ -4,7 +4,15 @@ import pytest
 
 from claude_sync import manifest
 from claude_sync.errors import ClaudeSyncError
-from claude_sync.manifest import Account, Manifest, Marketplace, Plugin, Skill, SkillSource
+from claude_sync.manifest import (
+    Account,
+    Manifest,
+    Marketplace,
+    McpServer,
+    Plugin,
+    Skill,
+    SkillSource,
+)
 
 COMMIT = "0123456789abcdef0123456789abcdef01234567"
 ORG = "00000000-0000-0000-0000-000000000000"
@@ -293,3 +301,152 @@ def test_odd_skill_paths_are_rejected(tmp_path, path):
     file = write(tmp_path, SRC + f'[[skill]]\nid = "tdd@tools"\npath = "{path}"\n')
     with pytest.raises(manifest.ManifestError, match="path of"):
         manifest.load(file)
+
+
+def with_mcp() -> Manifest:
+    return Manifest(
+        (),
+        (),
+        Account(ORG),
+        mcp=(
+            McpServer(
+                "api",
+                "http",
+                url="https://example.com/${PATH_PART:-mcp}",
+                headers={"Authorization": "value:Bearer ${T}", "X-Key": "keychain:svc-x"},
+            ),
+            McpServer("events", "sse", url="https://example.com/sse"),
+            McpServer(
+                "tools",
+                "stdio",
+                command="npx",
+                args=("-y", "pkg", "--home=${HOME}"),
+                env={"TOKEN": "env:TOOLS_TOKEN", "KEY": "keychain:svc/acct", "MODE": "value:fast"},
+            ),
+        ),
+    )
+
+
+def test_mcp_tables_round_trip(tmp_path):
+    file = tmp_path / manifest.MANIFEST_FILE
+    manifest.save(file, with_mcp())
+    loaded = manifest.load(file)
+    assert loaded == with_mcp()
+    assert list(loaded.mcp[2].env) == ["TOKEN", "KEY", "MODE"]
+
+
+def test_render_puts_mcp_after_skills_sorted_by_name_before_account():
+    text = manifest.render(
+        Manifest(
+            (),
+            (),
+            Account(ORG),
+            with_skills().skill_sources,
+            with_skills().skills,
+            tuple(reversed(with_mcp().mcp)),
+        )
+    )
+    assert text.index("[[skill]]") < text.index("[[mcp]]") < text.index("[account]")
+    order = [text.index(f'[[mcp]]\nname = "{name}"') for name in ("api", "events", "tools")]
+    assert order == sorted(order)
+
+
+def test_manifest_without_mcp_tables_is_unchanged(tmp_path):
+    assert manifest.load(write(tmp_path, "")).mcp == ()
+    assert "mcp" not in manifest.render(full())
+
+
+STDIO = '[[mcp]]\nname = "t"\ntransport = "stdio"\ncommand = "x"\n'
+HTTP = '[[mcp]]\nname = "t"\ntransport = "http"\nurl = "https://x"\n'
+
+
+@pytest.mark.parametrize(
+    ("text", "problem"),
+    [
+        (STDIO + 'env = { TOKEN = "abc" }\n', "env:, keychain: or value:"),
+        (HTTP + 'headers = { A = "abc" }\n', "env:, keychain: or value:"),
+        (STDIO + 'env = { TOKEN = "env:1BAD" }\n', "env.TOKEN of 't'"),
+        (STDIO + 'env = { TOKEN = "env:" }\n', "env.TOKEN of 't'"),
+        (STDIO + 'env = { TOKEN = "value:" }\n', "env.TOKEN of 't'"),
+        (HTTP + 'headers = { A = "value:" }\n', "headers.A of 't'"),
+        (
+            '[[mcp]]\nname = "t"\ntransport = "ws"\nurl = "https://x"\n',
+            "invalid transport 'ws'",
+        ),
+        ('[[mcp]]\nname = "t"\ntransport = 3\ncommand = "x"\n', "invalid transport"),
+        (STDIO + 'env = { TOKEN = "keychain:svc/a/b" }\n', "account must not contain /"),
+        (STDIO + 'env = { TOKEN = "keychain:" }\n', "env.TOKEN of 't'"),
+        (STDIO + 'env = { TOKEN = "keychain:/acct" }\n', "env.TOKEN of 't'"),
+        (STDIO + 'env = { TOKEN = "keychain:svc/" }\n', "env.TOKEN of 't'"),
+        (STDIO + "env = { TOKEN = 3 }\n", "env.TOKEN"),
+        (STDIO + 'env = { "" = "env:A" }\n', "env key"),
+        (STDIO + 'env = "x"\n', "env"),
+        ('[[mcp]]\nname = "t"\ntransport = "ws"\ncommand = "x"\n', "ws"),
+        ('[[mcp]]\nname = "-t"\ntransport = "stdio"\ncommand = "x"\n', "-t"),
+        ('[[mcp]]\nname = "t"\ntransport = "stdio"\n', "command"),
+        (HTTP.replace('url = "https://x"\n', ""), "url"),
+        (STDIO + 'url = "https://x"\n', "url"),
+        (STDIO + 'headers = { A = "env:A" }\n', "headers"),
+        (HTTP + 'command = "x"\n', "command"),
+        (HTTP + 'env = { A = "env:A" }\n', "env is not allowed on http server 't'"),
+        (
+            HTTP.replace('"http"', '"sse"') + 'env = { A = "env:A" }\n',
+            "env is not allowed on sse server 't'",
+        ),
+        (HTTP + 'args = ["a"]\n', "args"),
+        (STDIO + 'args = "a"\n', "args"),
+        (STDIO + "args = [1]\n", "args"),
+        (STDIO + "bogus = 1\n", "bogus"),
+        (STDIO + STDIO, "duplicate"),
+        ("mcp = 3\n", "mcp"),
+    ],
+)
+def test_invalid_mcp_tables_name_file_and_problem(tmp_path, text, problem):
+    file = write(tmp_path, text)
+    with pytest.raises(manifest.ManifestError) as error:
+        manifest.load(file)
+    assert str(file) in str(error.value)
+    assert problem in str(error.value)
+
+
+def test_bare_value_error_does_not_echo_the_value(tmp_path):
+    file = write(tmp_path, STDIO + 'env = { TOKEN = "s3cr3t-abc" }\n')
+    with pytest.raises(manifest.ManifestError) as error:
+        manifest.load(file)
+    assert "s3cr3t-abc" not in str(error.value)
+    assert "TOKEN" in str(error.value)
+
+
+def test_minimal_mcp_servers_load_with_defaults(tmp_path):
+    loaded = manifest.load(write(tmp_path, STDIO + HTTP.replace('"t"', '"u"')))
+    assert loaded.mcp == (
+        McpServer("t", "stdio", command="x"),
+        McpServer("u", "http", url="https://x"),
+    )
+    assert loaded.mcp[0].args == () and loaded.mcp[0].env == {}
+
+
+@pytest.mark.parametrize("bad", ["env:sk-LEAK 1", "keychain:leak/a/b", "keychain:/leakacct"])
+def test_invalid_reference_errors_never_echo_the_text(tmp_path, bad):
+    file = write(tmp_path, STDIO + f'env = {{ TOKEN = "{bad}" }}\n')
+    with pytest.raises(manifest.ManifestError) as error:
+        manifest.load(file)
+    message = str(error.value)
+    assert "env.TOKEN" in message
+    assert "leak" not in message.lower().replace("unleak", "")
+
+
+def test_invalid_reference_error_lists_the_allowed_kinds(tmp_path):
+    file = write(tmp_path, STDIO + 'env = { TOKEN = "env:1BAD" }\n')
+    with pytest.raises(manifest.ManifestError, match="env:<NAME>, keychain:.* or value:<text>"):
+        manifest.load(file)
+
+
+def test_empty_keys_are_named_per_table(tmp_path):
+    for body, word in (
+        ('env = { "" = "env:A" }\n', "env"),
+        ('headers = { "" = "env:A" }\n', "headers"),
+    ):
+        text = STDIO.replace("command", "command") if word == "env" else HTTP
+        with pytest.raises(manifest.ManifestError, match=f"empty {word} key"):
+            manifest.load(write(tmp_path, text + body))

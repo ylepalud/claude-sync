@@ -1,4 +1,4 @@
-"""A stand-in for the `claude` CLI's `plugin` commands, for tests.
+"""A stand-in for the `claude` CLI's `plugin` and `mcp` commands, for tests.
 
 The config dir is `$CLAUDE_CONFIG_DIR`, or `$HOME/.claude` when it is unset
 (as for the real CLI). State lives in `<config dir>/fake-claude.json`:
@@ -15,6 +15,12 @@ The config dir is `$CLAUDE_CONFIG_DIR`, or `$HOME/.claude` when it is unset
 reads the marketplace name and catalog from its `.claude-plugin/marketplace.json`.
 Every call is appended to `<config dir>/fake-claude.log` as one JSON line
 `{"argv": [...], "stdin": "devnull" | "other", "config_dir_env": <CLAUDE_CONFIG_DIR or null>}`.
+
+`mcp add-json <name> <json> --scope user` stores the JSON verbatim (only
+`streamable-http` becomes `http`; a remote entry without `type` is refused)
+in the top-level `mcpServers` of the CLI's state file (below), written with
+mode 600; an existing name fails. `mcp remove <name> -s user` removes it; an
+unknown name fails. Any other scope fails. Both honour `fail`.
 
 With `FAKE_CLAUDE_WRITES_STATE=1`, every call creates the CLI's state file
 when it is missing, as the real CLI does at start: `<config dir>/.claude.json`
@@ -51,21 +57,22 @@ def _option(argv: list[str], name: str) -> str | None:
     return argv[argv.index(name) + 1] if name in argv else None
 
 
-def _positional(argv: list[str], skip: int) -> str:
+def _positional(argv: list[str], skip: int, count: int = 1):
+    """The one positional argument after `argv[:skip]`, or a list of `count` of them."""
     rest = argv[skip:]
     values = []
     index = 0
     while index < len(rest):
-        if rest[index] == "--scope":
+        if rest[index] in ("--scope", "-s"):
             index += 2
         elif rest[index].startswith("-"):
             index += 1
         else:
             values.append(rest[index])
             index += 1
-    if len(values) != 1:
-        raise Exit(1, f"expected one argument, got {values}")
-    return values[0]
+    if len(values) != count:
+        raise Exit(1, f"expected {count} argument(s), got {len(values)}")
+    return values[0] if count == 1 else values
 
 
 def _command_words(argv: list[str]) -> str:
@@ -180,7 +187,46 @@ def _set_enabled(state: dict, argv: list[str], enabled: bool) -> str:
     return f"Successfully {word} plugin: {plugin_id}"
 
 
-def run(argv: list[str], config: Path) -> str:
+def _cli_state(file: Path) -> dict:
+    return json.loads(file.read_text()) if file.exists() else {}
+
+
+def _write_cli_state(file: Path, data: dict) -> None:
+    file.write_text(json.dumps(data, indent=2))
+    file.chmod(0o600)
+
+
+def _mcp_add_json(argv: list[str], cli_state: Path) -> str:
+    if _option(argv, "--scope") != "user":
+        raise Exit(1, "fake claude: mcp add-json supports the user scope only")
+    name, entry = _positional(argv, 2, count=2)
+    entry = json.loads(entry)
+    if "type" not in entry and "command" not in entry:
+        raise Exit(1, "Invalid configuration: type is required for a remote server")
+    if entry.get("type") == "streamable-http":
+        entry["type"] = "http"
+    data = _cli_state(cli_state)
+    servers = data.setdefault("mcpServers", {})
+    if name in servers:
+        raise Exit(1, f"MCP server {name} already exists in user config")
+    servers[name] = entry
+    _write_cli_state(cli_state, data)
+    return f"Added MCP server {name} to user config"
+
+
+def _mcp_remove(argv: list[str], cli_state: Path) -> str:
+    if _option(argv, "-s") != "user":
+        raise Exit(1, "fake claude: mcp remove supports the user scope only")
+    name = _positional(argv, 2)
+    data = _cli_state(cli_state)
+    if name not in data.get("mcpServers", {}):
+        raise Exit(1, f"No user-scoped MCP server found with name: {name}")
+    del data["mcpServers"][name]
+    _write_cli_state(cli_state, data)
+    return f"Removed MCP server {name} from user config"
+
+
+def run(argv: list[str], config: Path, cli_state: Path) -> str:
     state_file = config / STATE_FILE
     state = json.loads(state_file.read_text()) if state_file.exists() else {}
     for key, empty in (("marketplaces", []), ("plugins", []), ("catalog", {})):
@@ -193,6 +239,10 @@ def run(argv: list[str], config: Path) -> str:
         raise Exit(1, state["fail"][words])
     if words in state.get("output", {}):
         return state["output"][words]
+    if words == "mcp add-json":
+        return _mcp_add_json(argv, cli_state)
+    if words == "mcp remove":
+        return _mcp_remove(argv, cli_state)
     if words == "plugin list":
         return json.dumps(state["plugins"], indent=2)
     if words == "plugin marketplace list":
@@ -218,15 +268,15 @@ def main(argv: list[str]) -> int:
     home = Path(os.environ["HOME"])
     config = Path(config_dir) if config_dir else home / ".claude"
     config.mkdir(parents=True, exist_ok=True)
+    state_file = config / ".claude.json" if config_dir else home / ".claude.json"
     if os.environ.get("FAKE_CLAUDE_WRITES_STATE") == "1":
-        state_file = config / ".claude.json" if config_dir else home / ".claude.json"
         if not state_file.exists():
             state_file.write_text("{}\n")
     entry = {"argv": argv, "stdin": _stdin_kind(), "config_dir_env": config_dir}
     with (config / LOG_FILE).open("a") as log:
         log.write(json.dumps(entry) + "\n")
     try:
-        output = run(argv, config)
+        output = run(argv, config, state_file)
     except Exit as error:
         print(error.message, file=sys.stderr)
         return error.code

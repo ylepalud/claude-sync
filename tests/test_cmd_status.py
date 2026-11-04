@@ -193,3 +193,112 @@ def test_skill_differences_are_in_the_json(capsys, profile, skills_upstream):
     assert code == 4
     kinds = {(d["kind"], d["drift"]) for d in json.loads(out)["differences"]}
     assert {("clone-missing", True), ("skill-missing", True)} <= kinds
+
+
+# MCP servers
+
+SECRET = "s3cr3t-token-value"
+
+
+def declare_servers(directory, *servers):
+    declared = manifest.load(directory / manifest.MANIFEST_FILE)
+    manifest.save(
+        directory / manifest.MANIFEST_FILE,
+        manifest.Manifest(
+            declared.marketplaces,
+            declared.plugins,
+            declared.account,
+            declared.skill_sources,
+            declared.skills,
+            tuple(servers),
+        ),
+    )
+
+
+def write_servers(directory, servers):
+    (directory / ".claude.json").write_text(json.dumps({"mcpServers": servers}))
+
+
+REMOTE = manifest.McpServer(
+    "remote", "http", url="https://example.test/mcp", headers={"Authorization": "keychain:svc-x"}
+)
+
+
+def test_a_missing_server_is_drift_named_in_text_and_json(capsys, profile):
+    directory, _ = profile
+    declare_servers(directory, REMOTE)
+    code, out, _ = run(capsys, "status", "--profile", "perso")
+    assert code == 4
+    assert "drift: mcp-missing remote" in out
+    code, out, _ = run(capsys, "status", "--profile", "perso", "--json")
+    kinds = {(d["kind"], d["subject"], d["drift"]) for d in json.loads(out)["differences"]}
+    assert ("mcp-missing", "remote", True) in kinds
+
+
+def test_a_changed_header_names_the_field_and_prints_no_value(capsys, profile, fake_keychain):
+    directory, _ = profile
+    fake_keychain.set("svc-x", SECRET)
+    declare_servers(directory, REMOTE)
+    write_servers(
+        directory,
+        {
+            "remote": {
+                "type": "http",
+                "url": "https://example.test/mcp",
+                "headers": {"Authorization": "stale-other-value"},
+            }
+        },
+    )
+    code, out, err = run(capsys, "status", "--profile", "perso")
+    assert code == 4
+    assert "mcp-changed remote" in out and "headers.Authorization" in out
+    code_json, out_json, err_json = run(capsys, "status", "--profile", "perso", "--json")
+    assert code_json == 4
+    changed = [d for d in json.loads(out_json)["differences"] if d["kind"] == "mcp-changed"]
+    assert [(d["subject"], d["actual"]) for d in changed] == [("remote", "headers.Authorization")]
+    for text in (out, err, out_json, err_json):
+        assert SECRET not in text and "stale-other-value" not in text
+
+
+def test_an_unlisted_server_is_drift(capsys, profile):
+    directory, _ = profile
+    write_servers(directory, {"extra": {"type": "stdio", "command": "x"}})
+    code, out, _ = run(capsys, "status", "--profile", "perso")
+    assert code == 4
+    assert "drift: mcp-unlisted extra" in out
+
+
+def test_an_unresolvable_keychain_reference_is_drift_and_hides_the_tool_output(
+    capsys, profile, fake_keychain, monkeypatch
+):
+    directory, _ = profile
+    declare_servers(directory, REMOTE)
+    write_servers(
+        directory,
+        {"remote": {"type": "http", "url": "https://example.test/mcp", "headers": {}}},
+    )
+    monkeypatch.setenv("FAKE_SECURITY_EXIT", "7")
+    code, out, err = run(capsys, "status", "--profile", "perso")
+    assert code == 4
+    assert "mcp-secret" in out and "headers.Authorization" in out and "keychain:svc-x" in out
+    assert "tool output must not be shown" not in out + err
+    code, out, err = run(capsys, "status", "--profile", "perso", "--json")
+    assert "tool output must not be shown" not in out + err
+
+
+def test_an_unmanaged_server_is_information_not_drift(capsys, profile):
+    directory, _ = profile
+    write_servers(directory, {"odd": {"type": "stdio", "command": "x", "alwaysLoad": True}})
+    declare_servers(directory)
+    code, out, _ = run(capsys, "status", "--profile", "perso")
+    assert code == 0
+    assert "info: mcp-unmanaged odd" in out and "alwaysLoad" in out
+    assert "no drift" in out
+
+
+def test_status_help_mentions_mcp_servers_and_never_printing_values():
+    from claude_sync import registry
+
+    command = next(c for c in registry.COMMANDS if c.name == "status")
+    for word in ("MCP", "headers.Authorization", "never a value", "keychain:", "information"):
+        assert word in command.description

@@ -4,8 +4,9 @@ import subprocess
 
 import pytest
 
-from claude_sync import manifest, paths, sync
+from claude_sync import manifest, mcp, paths, sync
 from claude_sync.cli import main
+from claude_sync.errors import ClaudeSyncError
 
 ORG = "00000000-0000-0000-0000-000000000001"
 
@@ -27,11 +28,11 @@ class Setup:
         )
         fake_claude.seed(self.directory, {"upstream": {"acme/tools": str(self.repo)}})
 
-    def declare(self, plugins, *, ref=None, commit=True, account=None):
+    def declare(self, plugins, *, ref=None, commit=True, account=None, servers=()):
         market = manifest.Marketplace(
             "tools", "github:acme/tools", ref, self.commit if commit else None
         )
-        declared = manifest.Manifest((market,), tuple(plugins), account)
+        declared = manifest.Manifest((market,), tuple(plugins), account, mcp=tuple(servers))
         manifest.save(self.directory / manifest.MANIFEST_FILE, declared)
 
     def state(self):
@@ -430,3 +431,248 @@ def test_a_failing_plugin_action_leaves_the_skills_untouched(capsys, setup, skil
     assert code == 1 and "boom" in err
     assert skill_links() == {}
     assert not (paths.config_home() / "sources").exists()
+
+
+# MCP servers
+
+STDIO = manifest.McpServer("tools", "stdio", command="uvx", args=("srv",), env={"A": "value:one"})
+HTTP = manifest.McpServer(
+    "remote", "http", url="https://example.test/mcp", headers={"X-Id": "value:abc"}
+)
+
+
+def servers_of(setup):
+    return mcp.observe(setup.directory)
+
+
+def test_converge_one_stdio_and_one_http_server_then_status_is_clean(capsys, setup):
+    setup.declare([], servers=[STDIO, HTTP])
+    code, _, _ = run(capsys, "apply", "--profile", "perso")
+    assert code == 0
+    assert servers_of(setup) == {
+        "tools": {"type": "stdio", "command": "uvx", "args": ["srv"], "env": {"A": "one"}},
+        "remote": {"type": "http", "url": "https://example.test/mcp", "headers": {"X-Id": "abc"}},
+    }
+    assert run(capsys, "status", "--profile", "perso")[0] == 0
+
+
+def change_server(setup, name, **fields):
+    """Rewrite an observed server in the profile's .claude.json, as a drift would."""
+    file = setup.directory / mcp.STATE_FILE
+    data = json.loads(file.read_text())
+    data["mcpServers"][name].update(fields)
+    file.write_text(json.dumps(data))
+
+
+def converged_servers(capsys, setup, *servers):
+    setup.declare([], servers=servers)
+    assert run(capsys, "apply", "--profile", "perso")[0] == 0
+
+
+def test_replacing_an_http_server_needs_a_confirmation(capsys, setup):
+    converged_servers(capsys, setup, HTTP)
+    change_server(setup, "remote", url="https://elsewhere.test/mcp")
+    calls = len(setup.calls())
+    code, _, err = run(capsys, "apply", "--profile", "perso")
+    assert code == 3
+    assert "removes an http server: drops its OAuth sign-in" in err
+    assert servers_of(setup)["remote"]["url"] == "https://elsewhere.test/mcp"
+    assert not [c for c in setup.calls()[calls:] if c[0] == "mcp"]
+
+
+def test_replacing_a_stdio_server_needs_no_confirmation(capsys, setup):
+    converged_servers(capsys, setup, STDIO)
+    change_server(setup, "tools", command="other")
+    code, _, _ = run(capsys, "apply", "--profile", "perso")
+    assert code == 0
+    assert servers_of(setup)["tools"]["command"] == "uvx"
+
+
+def test_a_confirmed_http_replacement_is_applied(capsys, setup):
+    converged_servers(capsys, setup, HTTP)
+    change_server(setup, "remote", url="https://elsewhere.test/mcp")
+    assert run(capsys, "apply", "--profile", "perso", "--yes")[0] == 0
+    assert servers_of(setup)["remote"]["url"] == "https://example.test/mcp"
+
+
+def test_prune_removes_unlisted_servers_but_skips_unmanaged_ones(capsys, setup):
+    converged_servers(capsys, setup, STDIO)
+    file = setup.directory / mcp.STATE_FILE
+    data = json.loads(file.read_text())
+    data["mcpServers"]["extra"] = {"type": "stdio", "command": "x"}
+    data["mcpServers"]["odd"] = {"type": "stdio", "command": "y", "alwaysLoad": True}
+    file.write_text(json.dumps(data))
+    assert run(capsys, "apply", "--profile", "perso", "--yes")[0] == 0
+    assert set(servers_of(setup)) == {"tools", "extra", "odd"}
+    assert run(capsys, "apply", "--profile", "perso", "--prune", "--yes")[0] == 0
+    assert set(servers_of(setup)) == {"tools", "odd"}
+
+
+def test_apply_without_mcp_tables_leaves_servers_alone(capsys, setup):
+    converged_servers(capsys, setup, STDIO)
+    setup.declare([], servers=[STDIO])
+    assert run(capsys, "apply", "--profile", "perso")[0] == 0
+    assert not [c for c in setup.calls() if c[:2] == ["mcp", "remove"]]
+
+
+SECRET = "s3cr3t-token-value"
+KEYCHAIN_HEADER = manifest.McpServer(
+    "remote", "http", url="https://example.test/mcp", headers={"Authorization": "keychain:svc-x"}
+)
+
+
+def test_a_missing_keychain_item_stops_apply_before_plugins_or_skills_change(
+    capsys, setup, fake_keychain, skills_upstream
+):
+    declare_skills(setup, skills_upstream)
+    declared = manifest.load(setup.directory / manifest.MANIFEST_FILE)
+    manifest.save(
+        setup.directory / manifest.MANIFEST_FILE,
+        manifest.Manifest(
+            declared.marketplaces,
+            declared.plugins,
+            declared.account,
+            declared.skill_sources,
+            declared.skills,
+            (KEYCHAIN_HEADER,),
+        ),
+    )
+    code, _, err = run(capsys, "apply", "--profile", "perso", "--yes")
+    assert code == 1
+    assert "remote" in err and "Authorization" in err and "keychain:svc-x" in err
+    assert setup.installed() == {}
+    assert skill_links() == {}
+    assert servers_of(setup) == {}
+
+
+def test_a_failing_add_json_does_not_leak_the_keychain_value(capsys, setup, fake_keychain):
+    fake_keychain.set("svc-x", SECRET)
+    setup.declare([], servers=[KEYCHAIN_HEADER])
+    state = setup.state()
+    state["fail"] = {"mcp add-json": "boom"}
+    setup.fake.seed(setup.directory, state)
+    code, out, err = run(capsys, "apply", "--profile", "perso")
+    assert code == 1
+    assert SECRET not in out and SECRET not in err
+    assert "claude mcp add-json remote" in err and "***" in err and "boom" in err
+
+
+def test_dry_run_and_confirmation_show_the_masked_command(capsys, setup, fake_keychain):
+    fake_keychain.set("svc-x", SECRET)
+    setup.declare([], servers=[STDIO, KEYCHAIN_HEADER])
+    code, out, err = run(capsys, "apply", "--profile", "perso", "--dry-run")
+    assert code == 0
+    lines = [line for line in out.splitlines() if "mcp" in line]
+    assert lines == [
+        "would run: claude mcp add-json remote "
+        """'{"type": "http", "url": "https://example.test/mcp", """
+        """"headers": {"Authorization": "***"}}' """
+        "--scope user",
+        "would run: claude mcp add-json tools "
+        """'{"type": "stdio", "command": "uvx", "args": ["srv"], "env": {"A": "***"}}' """
+        "--scope user",
+    ]
+    assert SECRET not in out + err
+    assert servers_of(setup) == {}
+
+
+def test_the_confirmation_shows_the_masked_command(capsys, setup, fake_keychain):
+    fake_keychain.set("svc-x", SECRET)
+    setup.declare([], servers=[KEYCHAIN_HEADER])
+    assert run(capsys, "apply", "--profile", "perso")[0] == 0
+    fake_keychain.set("svc-x", "rotated-" + SECRET)
+    code, out, err = run(capsys, "apply", "--profile", "perso")
+    assert code == 3
+    assert '"Authorization": "***"' in err and "drops its OAuth sign-in" in err
+    assert SECRET not in out + err
+
+
+def test_apply_help_mentions_mcp_servers(capsys):
+    from claude_sync import registry
+
+    command = next(c for c in registry.COMMANDS if c.name == "apply")
+    assert "MCP" in command.description
+    assert any("MCP" in explanation for _, explanation in command.examples)
+
+
+def test_a_failing_add_json_that_echoes_its_arguments_does_not_leak_the_value(
+    capsys, setup, fake_keychain
+):
+    secret = 'tok"en\\value-123'
+    fake_keychain.set("svc-x", secret)
+    setup.declare([], servers=[KEYCHAIN_HEADER, STDIO])
+    escaped = json.dumps(secret)[1:-1]
+    state = setup.state()
+    state["fail"] = {"mcp add-json": f"bad request: raw={secret} json={escaped}"}
+    setup.fake.seed(setup.directory, state)
+    code, out, err = run(capsys, "apply", "--profile", "perso")
+    assert code == 1
+    assert secret not in out + err and escaped not in out + err
+    assert "bad request: raw=*** json=***" in err
+
+
+def test_mcp_actions_run_after_the_skill_actions(capsys, setup, skills_upstream):
+    declare_skills(setup, skills_upstream)
+    declared = manifest.load(setup.directory / manifest.MANIFEST_FILE)
+    manifest.save(
+        setup.directory / manifest.MANIFEST_FILE,
+        manifest.Manifest(
+            declared.marketplaces,
+            declared.plugins,
+            declared.account,
+            declared.skill_sources,
+            declared.skills,
+            (STDIO,),
+        ),
+    )
+    state = setup.state()
+    state["fail"] = {"mcp add-json": "boom"}
+    setup.fake.seed(setup.directory, state)
+    code, _, err = run(capsys, "apply", "--profile", "perso")
+    assert code == 1 and "boom" in err
+    assert set(skill_links()) == {"alpha", "beta"}
+
+
+def converge_failing(setup, words):
+    from claude_sync import converge
+    from claude_sync.context import Context
+
+    state = setup.state()
+    state["fail"] = {words: "boom"}
+    setup.fake.seed(setup.directory, state)
+    ctx = Context(json=False, dry_run=False, yes=True, stdin_is_tty=False)
+    with pytest.raises(ClaudeSyncError) as raised:
+        converge.converge(setup.directory, ctx)
+    return raised.value
+
+
+def test_a_failing_add_json_says_to_run_apply_again(capsys, setup):
+    setup.declare([], servers=[STDIO])
+    error = converge_failing(setup, "mcp add-json")
+    assert str(error).endswith("failed: boom (run apply again)")
+    assert error.__cause__ is None
+
+
+def test_a_failing_remove_has_no_run_again_hint(capsys, setup):
+    converged_servers(capsys, setup, STDIO)
+    change_server(setup, "tools", command="other")
+    error = converge_failing(setup, "mcp remove")
+    assert str(error).endswith("failed: boom")
+    assert "run apply again" not in str(error)
+    assert error.__cause__ is None
+
+
+def test_the_longest_secret_is_scrubbed_first(capsys, setup):
+    server = manifest.McpServer(
+        "remote",
+        "http",
+        url="https://example.test/mcp",
+        headers={"A": "value:token", "B": "value:token-with-suffix"},
+    )
+    setup.declare([], servers=[server])
+    state = setup.state()
+    state["fail"] = {"mcp add-json": "echo token-with-suffix"}
+    setup.fake.seed(setup.directory, state)
+    code, _, err = run(capsys, "apply", "--profile", "perso")
+    assert code == 1
+    assert "echo ***" in err and "suffix" not in err

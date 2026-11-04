@@ -15,6 +15,7 @@ FAKE_SYSTEM = {
     "pgrep": Path(__file__).with_name("fake_pgrep.py"),
     "launchctl": Path(__file__).with_name("fake_launchctl.py"),
 }
+FAKE_SECURITY = Path(__file__).with_name("fake_security.py")
 
 
 @pytest.fixture(autouse=True)
@@ -49,12 +50,12 @@ def _install_command(bin_dir: Path, script: str, monkeypatch, name: str = "claud
 
 @pytest.fixture(autouse=True)
 def block_real_system(tmp_path_factory, monkeypatch):
-    """Put a `pgrep` and a `launchctl` that refuse to run first on PATH, in every test.
+    """Put a `pgrep`, a `launchctl` and a `security` that refuse to run first on PATH.
 
     They exit 2, not 1: `pgrep` exits 1 for "no process", which must not be faked.
     """
     bin_dir = tmp_path_factory.mktemp("blocked-system-bin")
-    for name in FAKE_SYSTEM:
+    for name in (*FAKE_SYSTEM, "security"):
         script = f'#!/bin/sh\necho "real {name} blocked in tests" >&2\nexit 2\n'
         _install_command(bin_dir, script, monkeypatch, name)
 
@@ -150,6 +151,35 @@ def fake_system(block_real_system, isolated_environment, tmp_path_factory, monke
     for name in ("FAKE_LAUNCHCTL_EXIT",):
         monkeypatch.delenv(name, raising=False)
     return FakeSystem(isolated_environment / ".fake-system.log")
+
+
+@dataclass
+class FakeKeychain:
+    home: Path
+
+    def set(self, service: str, value: str, account: str | None = None) -> None:
+        """Store an item, as `security add-generic-password` would."""
+        file = self.home / ".fake-keychain.json"
+        items = json.loads(file.read_text()) if file.exists() else {}
+        items[service if account is None else f"{service}/{account}"] = value
+        file.write_text(json.dumps(items))
+
+    def calls(self) -> list[list[str]]:
+        """Every `security` call's arguments, in order."""
+        file = self.home / ".fake-keychain.log"
+        if not file.exists():
+            return []
+        return [json.loads(line)["argv"] for line in file.read_text().splitlines()]
+
+
+@pytest.fixture
+def fake_keychain(block_real_system, isolated_environment, tmp_path_factory, monkeypatch):
+    """Install tests/fake_security.py as `security`, ahead of the blocking one."""
+    script = f'#!/bin/sh\nexec "{sys.executable}" "{FAKE_SECURITY}" "$@"\n'
+    _install_command(tmp_path_factory.mktemp("fake-security-bin"), script, monkeypatch, "security")
+    for name in ("FAKE_SECURITY_EXIT", "FAKE_SECURITY_RAW"):
+        monkeypatch.delenv(name, raising=False)
+    return FakeKeychain(isolated_environment)
 
 
 LEGACY_GITIGNORE = """\

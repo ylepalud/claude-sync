@@ -171,7 +171,9 @@ def _rebuild(old: Path, ctx: Context) -> int:
     )
     migration.remove_plugin_caches(old)
     try:
-        code = converge.converge(old, ctx, cli=ClaudeCli(None), drift_hint=DRIFT_HINT, skills=False)
+        code = converge.converge(
+            old, ctx, cli=ClaudeCli(None), drift_hint=DRIFT_HINT, skills=False, mcp=False
+        )
     except KeyboardInterrupt:
         print(f"claude-sync: interrupted\n{hint}", file=sys.stderr)
         raise

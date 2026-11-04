@@ -223,7 +223,7 @@ def _load_agent(plist: Path) -> None:
 def _rebuild(old: Path, profile: Path, record: migration.Record, ctx: Context) -> int:
     """Run apply, then list what is left to the user; a failing apply is a warning (exit 4)."""
     try:
-        code = converge.converge(profile, ctx, skills=False)
+        code = converge.converge(profile, ctx, skills=False, mcp=False)
     except KeyboardInterrupt:
         print(
             "claude-sync: interrupted; the profile is migrated: run claude-sync apply",
