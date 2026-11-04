@@ -10,10 +10,10 @@ profile records what is installed, at which version.
 
 Status: under construction. The CLI frame, the leak guard, profile
 resolution, the zsh integration, `profile create`, the manifest commands
-(`import`, `status`, `apply`) and the migration of an existing `~/.claude`
-into a profile (`init`, `uninstall`, `adopt`) exist today. Skills, MCP
-servers, settings and machine tools come in step 5; see the roadmap below
-and `openspec/changes/` for the planned work.
+(`import`, `status`, `apply`), the migration of an existing `~/.claude`
+into a profile (`init`, `uninstall`, `adopt`) and external skill sources
+(step 5a) exist today. MCP servers (5b) and machine tools (5c) come next;
+see the roadmap below and `openspec/changes/` for the planned work.
 
 ## Install
 
@@ -149,8 +149,9 @@ honours too. Open shells keep the mappings they were started with until
 
 ## Manifest
 
-Each profile declares its marketplaces and user-scope plugins in
-`profile.toml`, at the root of the profile directory:
+Each profile declares its marketplaces and user-scope plugins, and its
+external skills (see Skills), in `profile.toml`, at the root of the profile
+directory:
 
 ```toml
 [[marketplace]]
@@ -248,6 +249,138 @@ the keys are absent or different, and when the signed-in organization
 (`oauthAccount.organizationUuid` in the profile's `.claude.json`) is not
 `org_uuid`. Before the first sign-in there is nothing to compare.
 
+## Skills
+
+A profile's own skills are real directories in its `skills/`, versioned by
+the profile's git repository; claude-sync leaves them alone. External
+skills, taken from someone else's repository, are declared in
+`profile.toml`, pinned to a commit, and linked into `skills/`:
+
+```toml
+[[skill_source]]
+name = "example-skills"
+source = "github:example/skills"
+ref = "main"
+commit = "0123456789abcdef0123456789abcdef01234567"
+
+[[skill]]
+id = "tdd@example-skills"
+path = "skills/engineering/tdd"
+tree = "89abcdef0123456789abcdef0123456789abcdef"
+```
+
+- `source` is `github:<owner>/<repo>` or `git:<url>` (a local path works
+  too). `ref` is an optional branch or tag; without it, the remote's
+  default branch. `commit` is optional, 40 lowercase hex characters.
+- A skill id is `<skill>@<source name>`: the skill name follows the profile
+  name rule and becomes the link `skills/<skill>`; the source must be
+  declared. `path` is the skill's directory in the repository, relative,
+  without `.`, `..` or empty segments.
+- `tree`, optional, is the git tree hash of that directory as installed.
+- Unknown keys, missing fields, duplicates and invalid values are errors
+  that name the file.
+
+### Shared clones
+
+Each source is cloned once per machine, in `sources/<name>/` next to the
+configuration file (`~/.config/claude-sync/sources/<name>/`), and every
+profile declaring that source name shares the clone. `skills/<skill>` in
+each profile is an absolute link to `sources/<name>/<path>`. claude-sync
+changes a clone only through `git clone`, `git fetch` and `git checkout
+--detach`.
+
+Since the clone is shared, a source name means one source at one commit on
+the machine. `apply` reads the manifests of the other profiles and refuses,
+naming both profiles and their commits, when one declares the same name
+with another `source`, records another `commit` than the current profile,
+or pins a commit the current profile leaves out. To use two commits of one
+repository, give the sources two names.
+
+### Import
+
+`import` (see Manifest) also records the links of the profile's `skills/`:
+
+- a link into `sources/<name>/` keeps the source name, its clone's `origin`
+  (`https://github.com/<owner>/<repo>` with or without `.git` becomes
+  `github:<owner>/<repo>`, any other URL `git:<url>`) and its checked-out
+  commit;
+- a link into another git checkout with a remote does the same, the source
+  named after the checkout's directory;
+- a link into `~/.agents/skills/<skill>`, installed by a third-party skills
+  CLI, is read from that CLI's lock file `~/.agents/.skill-lock.json`
+  (version 3, entries of type `github`): `source` gives
+  `github:<owner>/<repo>`, the directory of `skillPath` gives `path`, and
+  `skillFolderHash`, the git tree hash of the installed directory, gives
+  `tree`. There is no commit. One source is made per repository, named
+  after the first `pluginName` of its entries in file order, else
+  `<owner>-<repo>`.
+
+A name already taken gets `-2`, `-3`, and so on. Real skill directories are
+left out; a link to anything else, into a checkout without a remote or into
+the profile's own repository, and a lock entry missing or of another type,
+are left out with a warning. A lock of another version is ignored with a
+warning. From the manifest being replaced, import keeps the `ref` of a
+source of the same name and source (a ref you added by hand), and the
+`tree` of a skill of the same id and path, read again from the clone.
+
+Right after an import from the lock, the links still point into
+`~/.agents/skills`, and the source has no commit yet. `status` reports each
+link as pointing elsewhere (`skill-elsewhere`, run `claude-sync apply`) and
+the clone as missing, and exits 4; the missing commit is information. Run
+`apply`, then `import` again to record the commit:
+
+```sh
+claude-sync import --profile perso   # skills still link into ~/.agents
+claude-sync apply --profile perso    # clone, pin, relink (confirmation)
+claude-sync import --profile perso   # record the commit apply checked out
+claude-sync status --profile perso   # exit 0
+```
+
+### Status and apply
+
+`status` also reports a declared skill without its link, a link pointing
+elsewhere, a link into `sources/` that the manifest does not list, a
+missing clone, a clone of another source, at another commit, off its
+declared ref or with local changes, and a skill whose directory in the
+clone has another tree than its recorded `tree`. A source without a
+`commit` is information, not drift.
+
+`apply` converges the skills after the plugins. Per source, it clones a
+missing one (`--branch <ref>` when declared), fetches when the commit to
+check out or the ref is absent, then checks out, detached:
+
+- the recorded `commit`;
+- without one, when skills record a `tree`: the newest commit of the ref
+  where every such skill's directory has its recorded tree, that is, the
+  version that was installed. When no commit matches them all, the newest
+  one matching the most, and the others are reported as changed since
+  install (exit 4, accept with `import`);
+- without either: a new clone stays at the ref's head, an existing clone
+  on its ref stays where it is, and one off its ref moves to the ref's
+  head.
+
+Then it links each missing skill, and replaces a link pointing elsewhere,
+into `~/.agents` for example, after the confirmation that also covers the
+plugins. `--dry-run` prints the `git` commands and link changes. A recorded
+`tree` that still differs afterwards is reported like a moved plugin (exit
+4).
+
+`apply` stops with exit 1 before any change when:
+
+- a real file or directory is at a declared skill's link path (move it
+  away, or remove the skill from the manifest);
+- a clone in `sources/` has another `origin` than its declared source;
+- a clone with local changes would have to move to another commit (a dirty
+  clone already at its commit is only reported by `status`);
+- another profile declares the same source name differently (see Shared
+  clones).
+
+`--prune` also removes, after the confirmation, the links into `sources/`
+that the manifest does not list, and nothing else: no real directory, no
+link elsewhere, no clone. claude-sync never modifies or removes anything in
+`~/.agents`; once no profile links into it, remove it with the tool that
+installed it. `init` and `uninstall` leave skills alone (see Migration).
+
 ## Migration
 
 `init` moves an existing `~/.claude` and `~/.claude.json` into the default
@@ -285,7 +418,8 @@ Once confirmed, it runs, in order:
    `~/.config/claude-sync/backups/<UTC timestamp>.tar.gz` (gzip tar, mode
    600, symbolic links stored as links, sockets and FIFOs skipped and
    named). Backups are never deleted for you.
-2. Read the installed plugins and marketplaces for `profile.toml`.
+2. Read the installed plugins and marketplaces, and the skill links (see
+   Skills), for `profile.toml`.
 3. Rename `~/.claude` to `~/.config/claude-sync/profiles/<default>/`.
 4. Write the migration record `.claude-sync-migration.json` in the profile,
    updated after each later step. `uninstall` works from it; it is not
@@ -319,7 +453,9 @@ Once confirmed, it runs, in order:
 11. Remove the plugin caches and lists (`plugins/cache`,
     `plugins/marketplaces`, `installed_plugins.json`,
     `known_marketplaces.json`; `plugins/data` stays), write `profile.toml`
-    and run `claude-sync apply`, which installs them again (network).
+    and run `claude-sync apply`, which installs them again (network). This
+    apply converges plugins only: skill links stay as they are and no
+    source is cloned until you run `claude-sync apply` yourself.
 12. List the Markdown files that still name `~/.claude` (`projects/`,
     `plugins/` and `.git` are not searched). They are never rewritten: fix
     them by hand.
@@ -359,8 +495,9 @@ caches, it then removes them again and rebuilds them from `profile.toml`
 with `CLAUDE_CONFIG_DIR` unset (network), which installs the current
 upstream versions, and deletes `profile.toml`. A failing rebuild is a
 warning (exit 4) and keeps `profile.toml`: install the plugins it lists
-with `claude plugin install`. Other profiles, `config.toml` and the backups
-stay.
+with `claude plugin install`. Skills are never cloned or relinked: the
+skill links keep their targets. Other profiles, `config.toml`, the skill
+sources and the backups stay.
 
 A failure before the profile is moved back can be retried with
 `uninstall`; after it, the message says what is left to finish by hand.
@@ -455,7 +592,11 @@ scripts/check-denylist --tree --history
 3. [x] Manifest: `profile create`, `import` / `status` / `apply` for plugins
    and marketplaces.
 4. [x] `init` / `uninstall` with backup and migration, `adopt`.
-5. [ ] Skills, MCP, settings, machine `[tools]`.
+5. What the profile's git repository cannot carry (`settings.json` and the
+   profile's own skills stay in git):
+   - [x] 5a. External skill sources.
+   - [ ] 5b. MCP servers.
+   - [ ] 5c. Machine `[tools]`.
 
 ## License
 

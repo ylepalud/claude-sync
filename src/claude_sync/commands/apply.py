@@ -15,7 +15,7 @@ def configure(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--prune",
         action="store_true",
-        help="also remove the plugins and marketplaces the manifest does not list",
+        help="also remove the plugins, marketplaces and skill links the manifest does not list",
     )
 
 
@@ -50,12 +50,26 @@ COMMAND = Command(
         "afterwards (the upstream moved), apply reports it and exits 4; accept it\n"
         "with claude-sync import.\n"
         "\n"
+        "Skills are converged after the plugins: apply clones each skill source\n"
+        "once into ~/.config/claude-sync/sources/<name>, checks out its recorded\n"
+        "commit (detached) and links skills/<skill> to the clone. A link pointing\n"
+        "elsewhere is replaced after the confirmation; with --prune, links into\n"
+        "the sources directory that the manifest does not list are removed, and\n"
+        "nothing else. A real file or directory in the way, a clone with local\n"
+        "changes, or another profile declaring the same source name differently\n"
+        "stops apply with exit 1 before any change. A skill whose directory has\n"
+        "another tree than recorded is reported like a moved plugin (exit 4).\n"
+        "\n"
         "The profile is --profile NAME, else the profile of the current directory;\n"
         "its directory must exist (claude-sync profile create NAME)."
     ),
     examples=[
         ("claude-sync apply --profile work", "converge the work profile"),
-        ("claude-sync apply --profile work --dry-run", "print the claude commands, run none"),
+        (
+            "claude-sync apply --profile work --dry-run",
+            "print the claude and git commands and skill links, run none",
+        ),
+        ("claude-sync apply --profile work --prune", "also unlink skills the manifest dropped"),
         ("claude-sync apply --profile work --prune --yes", "also remove unlisted items, no prompt"),
     ],
     exit_codes=[

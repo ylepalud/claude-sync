@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from claude_sync import fileio, paths
-from claude_sync.config import toml_string
+from claude_sync.config import PROFILE_NAME, toml_string
 from claude_sync.errors import ClaudeSyncError
 
 MANIFEST_FILE = "profile.toml"
@@ -42,10 +42,27 @@ class Account:
 
 
 @dataclass(frozen=True)
+class SkillSource:
+    name: str
+    source: str
+    ref: str | None
+    commit: str | None
+
+
+@dataclass(frozen=True)
+class Skill:
+    id: str
+    path: str
+    tree: str | None
+
+
+@dataclass(frozen=True)
 class Manifest:
     marketplaces: tuple[Marketplace, ...]
     plugins: tuple[Plugin, ...]
     account: Account | None
+    skill_sources: tuple[SkillSource, ...] = ()
+    skills: tuple[Skill, ...] = ()
 
 
 def load(path: Path) -> Manifest:
@@ -79,7 +96,7 @@ def _parse(data: dict, file: Path) -> Manifest:
     def fail(problem: str) -> ManifestError:
         return ManifestError(f"{file}: {problem}")
 
-    unknown = set(data) - {"marketplace", "plugin", "account"}
+    unknown = set(data) - {"marketplace", "plugin", "account", "skill_source", "skill"}
     if unknown:
         raise fail(f"unknown key {sorted(unknown)[0]!r}")
 
@@ -106,6 +123,29 @@ def _parse(data: dict, file: Path) -> Manifest:
             raise fail(f"plugin {plugin.id!r} uses undeclared marketplace {market!r}")
         plugins.append(plugin)
 
+    sources = []
+    source_names: set[str] = set()
+    for table in _tables(data, "skill_source", fail):
+        _check_keys(table, {"name", "source"}, {"ref", "commit"}, "a skill source", fail)
+        source = _skill_source(table, fail)
+        if source.name in source_names:
+            raise fail(f"duplicate skill source {source.name!r}")
+        source_names.add(source.name)
+        sources.append(source)
+
+    skills = []
+    skill_ids: set[str] = set()
+    for table in _tables(data, "skill", fail):
+        _check_keys(table, {"id", "path"}, {"tree"}, "a skill", fail)
+        skill = _skill(table, fail)
+        if skill.id in skill_ids:
+            raise fail(f"duplicate skill {skill.id!r}")
+        skill_ids.add(skill.id)
+        origin = skill.id.partition("@")[2]
+        if origin not in source_names:
+            raise fail(f"skill {skill.id!r} uses undeclared skill source {origin!r}")
+        skills.append(skill)
+
     account = None
     if "account" in data:
         table = data["account"]
@@ -113,7 +153,7 @@ def _parse(data: dict, file: Path) -> Manifest:
             raise fail("'account' must be a table")
         _check_keys(table, {"org_uuid"}, set(), "account", fail)
         account = Account(_uuid(table["org_uuid"], fail))
-    return Manifest(tuple(marketplaces), tuple(plugins), account)
+    return Manifest(tuple(marketplaces), tuple(plugins), account, tuple(sources), tuple(skills))
 
 
 def _string(value: object, label: str, fail) -> str:
@@ -142,6 +182,46 @@ def _marketplace(table: dict, fail) -> Marketplace:
     if kind == "path" and (ref is not None or commit is not None):
         raise fail(f"a path source cannot have a ref or commit ({name!r})")
     return Marketplace(name, source, ref, commit)
+
+
+def _skill_source(table: dict, fail) -> SkillSource:
+    name = _string(table["name"], "skill source name", fail)
+    if not _NAME.fullmatch(name):
+        raise fail(f"invalid skill source name {name!r}")
+    source = _string(table["source"], f"source of {name!r}", fail)
+    kind, _, rest = source.partition(":")
+    if kind not in ("github", "git") or not rest:
+        raise fail(f"invalid source {source!r} for {name!r} (github: or git:)")
+    if kind == "github" and not _GITHUB.fullmatch(rest):
+        raise fail(f"invalid source {source!r} for {name!r} (expected github:<owner>/<repo>)")
+    ref = table.get("ref")
+    if "ref" in table:
+        ref = _string(ref, f"ref of {name!r}", fail)
+    commit = table.get("commit")
+    if "commit" in table:
+        if not isinstance(commit, str) or not _COMMIT.fullmatch(commit):
+            raise fail(f"commit of {name!r} must be 40 lowercase hex characters")
+    return SkillSource(name, source, ref, commit)
+
+
+def _skill(table: dict, fail) -> Skill:
+    id_ = _string(table["id"], "skill id", fail)
+    name, at, origin = id_.partition("@")
+    if not at:
+        raise fail(f"skill id {id_!r} must be <skill>@<source name>")
+    if not PROFILE_NAME.fullmatch(name) or not origin:
+        raise fail(f"invalid skill id {id_!r} (expected <skill>@<source name>)")
+    path = _string(table["path"], f"path of {id_!r}", fail)
+    if path.startswith("/") or any(part in ("", ".", "..") for part in path.split("/")):
+        raise fail(
+            f"path of {id_!r} must be a clean relative path, "
+            f"without '.', '..' or empty segments ({path!r})"
+        )
+    tree = table.get("tree")
+    if "tree" in table:
+        if not isinstance(tree, str) or not _COMMIT.fullmatch(tree):
+            raise fail(f"tree of {id_!r} must be 40 lowercase hex characters")
+    return Skill(id_, path, tree)
 
 
 def _plugin(table: dict, fail) -> Plugin:
@@ -190,6 +270,22 @@ def render(manifest: Manifest) -> str:
                 ]
             )
         )
+    for source in sorted(manifest.skill_sources, key=lambda s: s.name):
+        lines = [
+            "[[skill_source]]",
+            f"name = {toml_string(source.name)}",
+            f"source = {toml_string(source.source)}",
+        ]
+        if source.ref is not None:
+            lines.append(f"ref = {toml_string(source.ref)}")
+        if source.commit is not None:
+            lines.append(f"commit = {toml_string(source.commit)}")
+        blocks.append("\n".join(lines))
+    for skill in sorted(manifest.skills, key=lambda s: s.id):
+        lines = ["[[skill]]", f"id = {toml_string(skill.id)}", f"path = {toml_string(skill.path)}"]
+        if skill.tree is not None:
+            lines.append(f"tree = {toml_string(skill.tree)}")
+        blocks.append("\n".join(lines))
     if manifest.account is not None:
         blocks.append(f"[account]\norg_uuid = {toml_string(manifest.account.org_uuid)}")
     return "\n\n".join(blocks) + "\n" if blocks else ""

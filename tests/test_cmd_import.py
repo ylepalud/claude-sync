@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from claude_sync import manifest, paths
@@ -289,3 +291,44 @@ def test_declining_the_confirmation_leaves_the_file(capsys, source, tmp_path, mo
     assert "wrote" not in out
     assert "cancelled" in err
     assert target.read_text() == "# mine\n"
+
+
+def test_import_records_the_skills_linked_through_the_lock_file(capsys, source, skill_lock):
+    directory, _ = source
+    skill_lock(
+        {
+            "tdd": {
+                "source": "acme/skills",
+                "sourceType": "github",
+                "skillPath": "skills/engineering/tdd/SKILL.md",
+                "skillFolderHash": "a" * 40,
+            }
+        }
+    )
+    (directory / "skills").mkdir()
+    (directory / "skills" / "tdd").symlink_to(Path.home() / ".agents/skills/tdd")
+    code, out, _ = run(capsys, "import", "--source", str(directory), "--output", "-")
+    assert code == 0
+    assert out.endswith(
+        '[[skill_source]]\nname = "acme-skills"\nsource = "github:acme/skills"\n\n'
+        '[[skill]]\nid = "tdd@acme-skills"\npath = "skills/engineering/tdd"\n'
+        f'tree = "{"a" * 40}"\n'
+    )
+
+
+def test_apply_then_import_then_status_is_stable(capsys, fake_claude, skills_upstream):
+    directory = paths.profile_dir("perso")
+    declared = manifest.Manifest(
+        (),
+        (),
+        None,
+        (manifest.SkillSource("kit", skills_upstream.source, "main", skills_upstream.first),),
+        (manifest.Skill("alpha@kit", "skills/alpha", None),),
+    )
+    file = directory / manifest.MANIFEST_FILE
+    manifest.save(file, declared)
+    before = file.read_text()
+    assert run(capsys, "apply", "--profile", "perso")[0] == 0
+    assert run(capsys, "import", "--profile", "perso", "--yes")[0] == 0
+    assert file.read_text() == before
+    assert run(capsys, "status", "--profile", "perso")[0] == 0

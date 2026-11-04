@@ -4,7 +4,7 @@ import pytest
 
 from claude_sync import manifest
 from claude_sync.errors import ClaudeSyncError
-from claude_sync.manifest import Account, Manifest, Marketplace, Plugin
+from claude_sync.manifest import Account, Manifest, Marketplace, Plugin, Skill, SkillSource
 
 COMMIT = "0123456789abcdef0123456789abcdef01234567"
 ORG = "00000000-0000-0000-0000-000000000000"
@@ -171,3 +171,125 @@ def test_source_spec_per_type(tmp_path, isolated_environment):
     assert spec("path:/abs/dir") == "/abs/dir"
     expanded = spec("path:~/Dev/market")
     assert expanded == str((isolated_environment / "Dev" / "market").resolve())
+
+
+TREE = "fedcba9876543210fedcba9876543210fedcba98"
+
+
+def with_skills() -> Manifest:
+    return Manifest(
+        marketplaces=(),
+        plugins=(),
+        account=None,
+        skill_sources=(
+            SkillSource("local", "git:https://example.com/x.git", None, None),
+            SkillSource("tools", "github:acme/skills", "main", COMMIT),
+        ),
+        skills=(
+            Skill("grill@tools", "skills/grill", None),
+            Skill("tdd@tools", "skills/engineering/tdd", TREE),
+        ),
+    )
+
+
+def test_skills_round_trip(tmp_path):
+    file = tmp_path / manifest.MANIFEST_FILE
+    manifest.save(file, with_skills())
+    assert manifest.load(file) == with_skills()
+
+
+def test_manifest_without_skill_tables_is_unchanged(tmp_path):
+    file = write(tmp_path, '[[marketplace]]\nname = "a"\nsource = "github:o/a"\n')
+    loaded = manifest.load(file)
+    assert loaded.skill_sources == () and loaded.skills == ()
+    assert manifest.render(loaded) == '[[marketplace]]\nname = "a"\nsource = "github:o/a"\n'
+
+
+def test_render_puts_skills_after_plugins_sorted():
+    ordered = with_skills()
+    text = manifest.render(
+        Manifest(
+            (),
+            (),
+            None,
+            tuple(reversed(ordered.skill_sources)),
+            tuple(reversed(ordered.skills)),
+        )
+    )
+    assert text.index('name = "local"') < text.index('name = "tools"')
+    assert text.index('"grill@tools"') < text.index('"tdd@tools"')
+    assert text.index("[[skill_source]]") < text.index("[[skill]]")
+    full_text = manifest.render(full())
+    assert "skill" not in full_text
+
+
+def test_render_orders_plugins_before_skill_tables():
+    text = manifest.render(
+        Manifest(
+            (), (Plugin("p@a", "1", True),), None, with_skills().skill_sources, with_skills().skills
+        )
+    )
+    assert text.index("[[plugin]]") < text.index("[[skill_source]]")
+
+
+SRC = '[[skill_source]]\nname = "tools"\nsource = "github:acme/skills"\n'
+
+
+@pytest.mark.parametrize(
+    ("text", "problem"),
+    [
+        ('[[skill_source]]\nname = "t"\nsource = "url:https://x"\n', "url:https://x"),
+        ('[[skill_source]]\nname = "t"\nsource = "github:nope"\n', "github:nope"),
+        ('[[skill_source]]\nname = "t"\nsource = "git:"\n', "git:"),
+        ('[[skill_source]]\nname = "-t"\nsource = "git:x"\n', "-t"),
+        ('[[skill_source]]\nname = "t"\nsource = "git:x"\ncommit = "abc"\n', "commit"),
+        ('[[skill_source]]\nname = "t"\nsource = "git:x"\nref = ""\n', "ref"),
+        ('[[skill_source]]\nname = "t"\nsource = "git:x"\nbogus = 1\n', "bogus"),
+        ('[[skill_source]]\nname = "t"\n', "source"),
+        (
+            '[[skill_source]]\nname = "t"\nsource = "git:x"\n'
+            '[[skill_source]]\nname = "t"\nsource = "git:y"\n',
+            "duplicate",
+        ),
+        (SRC + '[[skill]]\nid = "tdd"\npath = "a"\n', "tdd"),
+        (SRC + '[[skill]]\nid = "TDD@tools"\npath = "a"\n', "TDD@tools"),
+        (SRC + '[[skill]]\nid = "tdd@other"\npath = "a"\n', "other"),
+        (SRC + '[[skill]]\nid = "tdd@tools"\npath = "/abs"\n', "/abs"),
+        (SRC + '[[skill]]\nid = "tdd@tools"\npath = "a/../b"\n', "a/../b"),
+        (SRC + '[[skill]]\nid = "tdd@tools"\npath = ""\n', "path"),
+        (SRC + '[[skill]]\nid = "tdd@tools"\npath = "a"\ntree = "xyz"\n', "tree"),
+        (SRC + '[[skill]]\nid = "tdd@tools"\npath = "a"\nbogus = 1\n', "bogus"),
+        (SRC + '[[skill]]\nid = "tdd@tools"\n', "path"),
+        (
+            SRC
+            + '[[skill]]\nid = "tdd@tools"\npath = "a"\n[[skill]]\nid = "tdd@tools"\npath = "b"\n',
+            "duplicate",
+        ),
+    ],
+)
+def test_invalid_skill_tables_name_file_and_problem(tmp_path, text, problem):
+    file = write(tmp_path, text)
+    with pytest.raises(manifest.ManifestError) as error:
+        manifest.load(file)
+    assert str(file) in str(error.value)
+    assert problem in str(error.value)
+
+
+def test_valid_skill_without_optional_fields_loads(tmp_path):
+    file = write(tmp_path, SRC + '[[skill]]\nid = "tdd@tools"\npath = "a/b"\n')
+    loaded = manifest.load(file)
+    assert loaded.skills == (Skill("tdd@tools", "a/b", None),)
+    assert loaded.skill_sources == (SkillSource("tools", "github:acme/skills", None, None),)
+
+
+def test_skill_id_without_at_has_a_dedicated_error(tmp_path):
+    file = write(tmp_path, SRC + '[[skill]]\nid = "tdd"\npath = "a"\n')
+    with pytest.raises(manifest.ManifestError, match="skill id .* must be <skill>@<source name>"):
+        manifest.load(file)
+
+
+@pytest.mark.parametrize("path", [".", "a/./b", "./a", "a//b", "a/b/", "a/.."])
+def test_odd_skill_paths_are_rejected(tmp_path, path):
+    file = write(tmp_path, SRC + f'[[skill]]\nid = "tdd@tools"\npath = "{path}"\n')
+    with pytest.raises(manifest.ManifestError, match="path of"):
+        manifest.load(file)

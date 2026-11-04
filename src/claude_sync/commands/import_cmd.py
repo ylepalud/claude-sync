@@ -34,10 +34,12 @@ def run(args: argparse.Namespace, ctx: Context) -> int:
         if args.output is not None
         else profile.directory / manifest.MANIFEST_FILE
     )
-    account = None
+    previous = None
     if destination is not None and destination.exists():
-        account = manifest.load(destination).account
-    imported = converge.build_manifest(source, account)
+        previous = manifest.load(destination)
+    imported = converge.build_manifest(
+        source, previous.account if previous else None, previous=previous
+    )
     if to_stdout:
         sys.stdout.write(manifest.render(imported))
         return int(ExitCode.OK)
@@ -64,6 +66,13 @@ COMMAND = Command(
         "source is a file or claude.ai are skipped with a warning on standard\n"
         "error, with their plugins.\n"
         "\n"
+        "The skills in the profile's skills/ directory are recorded too: a link\n"
+        "into sources/<name>/, into another git checkout with a remote, or into\n"
+        "~/.agents/skills described by its .skill-lock.json (version 3) becomes a\n"
+        "[[skill_source]] and a [[skill]]. Real skill directories and other links\n"
+        "are left out, with a warning for each skipped link. Skills still linked\n"
+        "into ~/.agents show in status until claude-sync apply relinks them.\n"
+        "\n"
         "--source DIR reads the configuration in DIR (for example ~/.claude)\n"
         "instead of the profile. The result goes to --output FILE, to standard\n"
         "output with '--output -' (only the manifest is printed there), or by\n"
@@ -74,7 +83,10 @@ COMMAND = Command(
     ),
     examples=[
         ("claude-sync import --source ~/.claude --output -", "print the manifest of ~/.claude"),
-        ("claude-sync import --profile work", "refresh profile.toml of the work profile"),
+        (
+            "claude-sync import --profile work",
+            "refresh profile.toml of the work profile, skills included",
+        ),
         ("claude-sync import --profile work --yes", "overwrite without asking"),
         ("claude-sync import --output manifest.toml --dry-run", "print where it would write"),
     ],
