@@ -15,8 +15,8 @@ the profile directory. It holds zero or more `[[marketplace]]` tables with
 `path:`) and an optional `commit` (40 lowercase hex, the commit recorded at
 import, not allowed for `path:`); zero or more `[[plugin]]` tables with `id`
 (`<plugin>@<marketplace>`), `version` and `enabled`; the skill tables
-defined by `skill-sources` (`[[skill_source]]`, `[[skill]]`); and an
-optional `[account]` table with `org_uuid` (a UUID). Every plugin's
+defined by `skill-sources` (`[[skill_source]]`, `[[skill]]`); the `[[mcp]]`
+tables defined by `mcp-servers`; and an optional `[account]` table with `org_uuid` (a UUID). Every plugin's
 marketplace SHALL be declared. Unknown keys, duplicate names or ids, a
 plugin whose marketplace is undeclared, or an invalid value SHALL make
 commands that read the manifest fail with exit code 1, naming the file and
@@ -95,22 +95,24 @@ when there is no drift and 4 otherwise, and support `--json`.
 `claude-sync apply` SHALL make the profile match its manifest as far as the
 CLI allows: add missing marketplaces (with `#<ref>` when a ref is declared),
 install missing plugins, enable or disable plugins to match, write the
-account guide keys, and converge skills as `skill-sources` defines. A
+account guide keys, converge skills as `skill-sources` defines, and
+converge MCP servers as `mcp-servers` defines. A
 marketplace present with another source or ref SHALL be removed and added
 again, and its plugins reinstalled with their declared enabled state, only
 after a confirmation that says removing a marketplace uninstalls its plugins
 and deletes their data. Unlisted plugins and marketplaces SHALL be removed
 only with `--prune`, after the same kind of confirmation. One confirmation
-SHALL list every action that needs one, plugins and skills together, each
-with what it changes. apply SHALL never approve a marketplace-declared
+SHALL list every action that needs one, plugins, skills and MCP servers
+together, each with what it changes. apply SHALL never approve a marketplace-declared
 command on the user's behalf: when the CLI requires that approval, apply
 stops with exit code 1 and shows the CLI's message. After applying, a
 plugin version or a marketplace commit that still differs from the manifest
 SHALL be reported, with the hint to accept it with `claude-sync import`, and
 the exit code SHALL be 4. `--dry-run` SHALL print the planned `claude` and
-`git` commands and link changes and change nothing. A failing `claude` or
-`git` command SHALL stop apply with exit code 1 and show the command and its
-error output.
+`git` commands and link changes, with every secret value masked, and change
+nothing. A failing `claude` or
+`git` command SHALL stop apply with exit code 1 and show the command (secret
+values masked) and its error output.
 
 #### Scenario: Converge a new profile
 - **WHEN** a new profile's manifest lists one marketplace and one plugin, matching what the marketplace serves
