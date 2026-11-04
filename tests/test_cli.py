@@ -80,6 +80,7 @@ def test_registry_order_is_stable():
         "init",
         "uninstall",
         "adopt",
+        "doctor",
     ]
 
 

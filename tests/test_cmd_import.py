@@ -474,3 +474,16 @@ def test_source_dot_claude_reads_the_servers_of_home_dot_claude_json(
     assert code == 0
     assert '"API_KEY" = "env:TOOLS_API_KEY"' in out
     assert SECRET not in out + err
+
+
+def test_tools_survive_import(capsys, source, fake_claude):
+    directory, _ = source
+    profile = paths.profile_dir("perso")
+    profile.mkdir(parents=True)
+    tools = (manifest.Tool("fakejq", version="1.7", install="brew:fakejq"), manifest.Tool("rtk"))
+    manifest.save(profile / manifest.MANIFEST_FILE, manifest.Manifest((), (), None, tools=tools))
+    code, _, _ = run(capsys, "import", "--source", str(directory), "--profile", "perso", "--yes")
+    assert code == 0
+    written = manifest.load(profile / manifest.MANIFEST_FILE)
+    assert written.tools == tuple(sorted(tools, key=lambda t: t.name))
+    assert [p.id for p in written.plugins] == ["fmt@tools", "lint@tools"]

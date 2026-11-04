@@ -6,9 +6,9 @@
 
 ## 2. Commands
 
-- [ ] 2.1 `src/claude_sync/commands/doctor.py` per spec and design (kind `mutate` plus `--json`): listing in text and `--json`, exit 0/4; `--fix` with one confirmation listing the commands with absolute manager paths (exit 3 without TTY/`--yes`), `script:` only with a TTY confirmation even with `--yes`, no prompt when nothing to run, `--dry-run`, `--fix --json` without `--yes` exit 2, stop on first failure (exit 1 with command and stderr), recheck after with exit 0/4. Register it. Tests in `tests/test_cmd_doctor.py` for every spec scenario plus exit 3 without TTY, first-failure stop, the upgrade path, the JSON shape and the dry run.
-- [ ] 2.2 `commands/apply.py`: tool pre-check before calling converge; `converge.build_manifest` keeps `previous.tools`. Tests: `tests/test_cmd_apply.py` (spec scenario "Apply refuses": nothing changes, `doctor --fix` hint; a passing case), `tests/test_cmd_import.py` (spec scenario "Tools survive import"), and init/uninstall unaffected by a missing tool.
-- [ ] 2.3 `--help` of doctor complete (description, examples, exit codes, neutral names) and apply's help mentions the tool check.
+- [x] 2.1 `src/claude_sync/commands/doctor.py` per spec and design (kind `mutate` plus `--json`): listing in text and `--json`, exit 0/4; `--fix` with one confirmation listing the commands with absolute manager paths (exit 3 without TTY/`--yes`), `script:` only with a TTY confirmation even with `--yes`, no prompt when nothing to run, `--dry-run`, `--fix --json` without `--yes` exit 2, stop on first failure (exit 1 with command and stderr), recheck after with exit 0/4. Register it. Tests in `tests/test_cmd_doctor.py` for every spec scenario plus exit 3 without TTY, first-failure stop, the upgrade path, the JSON shape and the dry run.
+- [x] 2.2 `commands/apply.py`: tool pre-check before calling converge; `converge.build_manifest` keeps `previous.tools`. Tests: `tests/test_cmd_apply.py` (spec scenario "Apply refuses": nothing changes, `doctor --fix` hint; a passing case), `tests/test_cmd_import.py` (spec scenario "Tools survive import"), and init/uninstall unaffected by a missing tool.
+- [x] 2.3 `--help` of doctor complete (description, examples, exit codes, neutral names) and apply's help mentions the tool check.
 
 ## 3. Documentation
 

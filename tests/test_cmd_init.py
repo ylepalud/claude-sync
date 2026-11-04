@@ -566,3 +566,15 @@ def test_init_declares_the_mcp_servers_but_leaves_them_untouched(
     assert json.loads((profile / ".claude.json").read_text())["mcpServers"] == servers
     argv = legacy.fake_claude.calls(profile)
     assert argv and not [a for a in argv if a[0] == "mcp"]
+
+
+def test_a_missing_tool_does_not_stop_init(capsys, legacy, fake_system, reset_on_cache_removal):
+    other = paths.profile_dir("work")
+    other.mkdir(parents=True)
+    manifest.save(
+        other / manifest.MANIFEST_FILE,
+        manifest.Manifest((), (), None, tools=(manifest.Tool("fakejq", version="9.9"),)),
+    )
+    code, _, _ = run(capsys, "init", "--yes")
+    assert code == 0
+    assert not os.path.lexists(legacy.home / ".claude")

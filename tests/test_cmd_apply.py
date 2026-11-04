@@ -28,11 +28,13 @@ class Setup:
         )
         fake_claude.seed(self.directory, {"upstream": {"acme/tools": str(self.repo)}})
 
-    def declare(self, plugins, *, ref=None, commit=True, account=None, servers=()):
+    def declare(self, plugins, *, ref=None, commit=True, account=None, servers=(), tools=()):
         market = manifest.Marketplace(
             "tools", "github:acme/tools", ref, self.commit if commit else None
         )
-        declared = manifest.Manifest((market,), tuple(plugins), account, mcp=tuple(servers))
+        declared = manifest.Manifest(
+            (market,), tuple(plugins), account, mcp=tuple(servers), tools=tuple(tools)
+        )
         manifest.save(self.directory / manifest.MANIFEST_FILE, declared)
 
     def state(self):
@@ -676,3 +678,49 @@ def test_the_longest_secret_is_scrubbed_first(capsys, setup):
     code, _, err = run(capsys, "apply", "--profile", "perso")
     assert code == 1
     assert "echo ***" in err and "suffix" not in err
+
+
+def test_apply_refuses_a_too_old_tool_and_changes_nothing(capsys, setup, fake_tools):
+    fake_tools.install("fakejq", "fakejq-1.6")
+    setup.declare(
+        [manifest.Plugin("lint@tools", "1.0.0", True)],
+        tools=[manifest.Tool("fakejq", version="1.7")],
+    )
+    before = setup.state()
+    calls = len(setup.calls())
+    code, _, err = run(capsys, "apply", "--profile", "perso", "--yes")
+    assert code == 1
+    assert "fakejq" in err
+    assert "too-old" in err
+    assert "installed 1.6, required 1.7" in err
+    assert "claude-sync doctor --fix" in err
+    assert setup.state() == before
+    assert len(setup.calls()) == calls
+
+
+def test_apply_refuses_a_missing_tool_even_for_a_dry_run(capsys, setup, fake_tools):
+    setup.declare(
+        [manifest.Plugin("lint@tools", "1.0.0", True)],
+        tools=[manifest.Tool("fakejq"), manifest.Tool("faketool")],
+    )
+    code, _, err = run(capsys, "apply", "--profile", "perso", "--dry-run")
+    assert code == 1
+    assert "fakejq" in err
+    assert "faketool" in err
+    assert "missing" in err
+
+
+def test_apply_goes_on_when_the_tools_are_ok(capsys, setup, fake_tools):
+    fake_tools.install("fakejq", "fakejq-1.7.1")
+    setup.declare(
+        [manifest.Plugin("lint@tools", "1.0.0", True)],
+        tools=[manifest.Tool("fakejq", version="1.7")],
+    )
+    code, _, _ = run(capsys, "apply", "--profile", "perso")
+    assert code == 0
+    assert setup.installed() == {"lint@tools": True}
+
+
+def test_apply_help_mentions_the_tool_check(capsys):
+    _, out, _ = run(capsys, "apply", "--help")
+    assert "doctor --fix" in out
