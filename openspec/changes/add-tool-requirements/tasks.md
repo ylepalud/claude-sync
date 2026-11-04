@@ -12,4 +12,4 @@
 
 ## 3. Documentation
 
-- [ ] 3.1 README: a "Tools" section (table, version parsing and `check`, recipes and what `--fix` runs for install and upgrade, merge across profiles and conflicts, apply's pre-check, `script:` runs shell after confirmation) and the roadmap marked complete.
+- [x] 3.1 README: a "Tools" section (table, version parsing and `check`, recipes and what `--fix` runs for install and upgrade, merge across profiles and conflicts, apply's pre-check, `script:` runs shell after confirmation) and the roadmap marked complete.

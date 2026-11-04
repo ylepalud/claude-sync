@@ -8,13 +8,13 @@ Each profile is a separate `CLAUDE_CONFIG_DIR` under
 plugins, MCP servers, history and login. A declarative `profile.toml` in each
 profile records what is installed, at which version.
 
-Status: under construction. The CLI frame, the leak guard, profile
-resolution, the zsh integration, `profile create`, the manifest commands
-(`import`, `status`, `apply`), the migration of an existing `~/.claude`
-into a profile (`init`, `uninstall`, `adopt`), external skill sources
-(step 5a) and user-scope MCP servers (step 5b) exist today. Machine tools
-(5c) come next; see the roadmap below and `openspec/changes/` for the
-planned work.
+Status: complete for the roadmap below. The CLI frame, the leak guard,
+profile resolution, the zsh integration, `profile create`, the manifest
+commands (`import`, `status`, `apply`), the migration of an existing
+`~/.claude` into a profile (`init`, `uninstall`, `adopt`), external skill
+sources (step 5a), user-scope MCP servers (step 5b) and the command-line
+tools a profile needs, checked by `doctor` (step 5c), all exist. See
+`openspec/changes/` for any later work.
 
 ## Install
 
@@ -151,8 +151,9 @@ honours too. Open shells keep the mappings they were started with until
 ## Manifest
 
 Each profile declares its marketplaces and user-scope plugins, its
-external skills (see Skills) and its user-scope MCP servers (see MCP
-servers), in `profile.toml`, at the root of the profile directory:
+external skills (see Skills), its user-scope MCP servers (see MCP servers)
+and the command-line tools it needs (see Tools), in `profile.toml`, at the
+root of the profile directory:
 
 ```toml
 [[marketplace]]
@@ -541,6 +542,145 @@ its `apply` leaves them alone, so imported literals stay until you run
 `claude-sync apply`. `uninstall` moves `.claude.json` back with the servers
 as they are and runs no `claude mcp` command.
 
+## Tools
+
+A profile can declare the command-line tools it needs. They live on the
+machine, not in the profile, so claude-sync only checks them, and installs
+or upgrades them when you ask:
+
+```toml
+[[tool]]
+name = "jq"
+version = "1.7"
+install = "brew:jq"
+
+[[tool]]
+name = "gh"
+check = "gh version"
+install = "brew:gh"
+
+[[tool]]
+name = "example-cli"
+install = "script:curl -fsSL https://example.invalid/install.sh | sh"
+```
+
+- `name` matches `[A-Za-z0-9][A-Za-z0-9._-]*` and is unique in the file.
+- `version`, optional, is a minimum, never a pin: dotted numbers with at
+  least two components, such as `1.7` or `0.20.0`.
+- `check`, optional, is the command line that proves the tool is there;
+  its first word must be the tool's name. The default is `<name>
+  --version`.
+- `install`, optional, is a recipe: `brew:<formula>`, `npm:<package>`,
+  `uv:<package>`, `cargo:<crate>` or `script:<command>`. A `script:` is a
+  single line without control characters.
+- Unknown keys, an invalid value and duplicate names are errors that name
+  the file. `profile.toml` lists the tools after the MCP servers, by name.
+
+### Check
+
+The check command is split like a shell would (`shlex`) but runs without a
+shell, with a 10 second timeout. The tool is present when it exits 0;
+a timeout, a missing binary or another exit code makes it `missing`. The
+installed version is the first dotted number with two or more components
+in its standard output: `rtk 0.20.0` gives `0.20.0`, `gh version 2.101.0
+(date)` gives `2.101.0`, `jq-1.6` gives `1.6`. Versions compare as
+integers, part by part (`0.20.0` is newer than `0.8`). With a `version`, a
+lower installed version, or one that cannot be read, is `too-old`. Only
+standard output is read, and there is no shell to redirect: a tool that
+prints its version elsewhere, or with no dotted number, needs a `check`
+with other arguments that print one (`gh version`), or no `version`.
+
+Tools are looked up on the `PATH` of the shell that runs claude-sync. A
+tool installed through nvm or pyenv is found only where their `PATH`
+entries or shims are set up (by your shell's startup files): a shell or a
+script without them reports it missing, or finds another copy.
+
+### Doctor
+
+```sh
+claude-sync doctor                   # exit 4 when a tool is not ok
+claude-sync doctor --json
+claude-sync doctor --fix --dry-run   # print the install commands
+claude-sync doctor --fix
+```
+
+`doctor` reads the `profile.toml` of every directory in `profiles/`, not
+only the current profile, and merges the tools by name:
+
+- the highest minimum `version` wins;
+- `check` and `install` each come from the first profile, in name order,
+  that declares them;
+- a different recipe in another profile is a conflict, reported as
+  `conflict gh: perso brew:gh; work script:install-gh`.
+
+It lists each tool with its status (`ok`, `missing` or `too-old`), the
+installed and required versions, the profiles requiring it, its recipe
+and the absolute path of the binary found first on `PATH`. It exits 0 when
+every tool is ok and there is no conflict, 4 otherwise. `--json` prints:
+
+```json
+{"tools": [{"name": "jq", "status": "missing", "installed": null,
+  "required": "1.7", "profiles": ["work"], "recipe": "brew:jq",
+  "path": null}], "conflicts": [], "ok": false}
+```
+
+A conflict is `{"name": ..., "recipes": [{"profile": ..., "recipe":
+...}]}`.
+
+### Fix
+
+`doctor --fix` builds one command per missing or too old tool that has a
+recipe. Each command installs or upgrades the tool whatever its state, so
+it also upgrades a tool that is too old:
+
+| Recipe | Command |
+| ------ | ------- |
+| `brew:<formula>` | `brew install <formula>`, `brew upgrade` if listed |
+| `npm:<package>` | `npm install -g <package>@latest` |
+| `uv:<package>` | `uv tool install --upgrade <package>` |
+| `cargo:<crate>` | `cargo install --force <crate>` |
+| `script:<command>` | `/bin/sh -c <command>` |
+
+`brew` upgrades instead of installing when `brew list <formula>` succeeds,
+as `brew upgrade` fails on a formula that is not installed.
+
+Each manager is found on `PATH` and shown by its absolute path
+(`/opt/homebrew/bin/brew install jq`); a manager that is not there stops
+`doctor` with exit 1. A tool without a recipe is only reported.
+
+`doctor` prints every command and asks one confirmation, then runs them in
+order. Nothing to run asks nothing. Without a TTY and without `--yes` it
+exits 3. The first failing command stops it with exit 1, showing the
+command and its error output. Otherwise it checks again and exits 0 when
+every tool is ok, 4 otherwise, naming what is still missing and, for a
+tool still too old, the binary found first on `PATH` (often an older copy
+shadowing the one just installed). `--dry-run` prints the commands and
+runs none (exit 0).
+
+A `script:` recipe runs arbitrary shell, and it may come from a profile
+you pulled. It always needs a confirmation typed on a terminal: `--yes`
+answers for the managers, then `doctor` asks again for the scripts.
+Without a TTY, and with `--json`, scripts are skipped and reported
+(`skipped (needs an interactive confirmation): example-cli`), so the tool
+stays missing and `doctor` exits 4. `--fix --json` requires `--yes` (exit 2
+otherwise), prints the progress on standard error and the final JSON
+document on standard output.
+
+### Apply and import
+
+`apply` checks the tools its profile declares before any action, and
+refuses with exit 1, naming each tool that is missing or too old and
+suggesting `claude-sync doctor --fix`:
+
+```text
+claude-sync: error: profile 'work' needs tools that are not ok:
+  jq: too-old (installed 1.6, required 1.7)
+run `claude-sync doctor --fix` to install or upgrade them
+```
+
+Only `apply` checks: `init` and `uninstall` do not. `import` cannot see
+tools, so it keeps the `[[tool]]` tables of the manifest it replaces.
+
 ## Migration
 
 `init` moves an existing `~/.claude` and `~/.claude.json` into the default
@@ -758,7 +898,7 @@ scripts/check-denylist --tree --history
    profile's own skills stay in git):
    - [x] 5a. External skill sources.
    - [x] 5b. MCP servers.
-   - [ ] 5c. Machine `[tools]`.
+   - [x] 5c. Machine tools: `[[tool]]` tables and `doctor`.
 
 ## License
 
