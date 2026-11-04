@@ -627,3 +627,19 @@ def test_uninstall_never_clones_or_relinks_declared_skills(
     assert (code, err) == (0, "")
     assert os.readlink(legacy.root / "skills" / "out") == "../../.agents/skills/out"
     assert not (paths.config_home() / "sources").exists()
+
+
+def test_uninstall_leaves_mcp_servers_alone(capsys, migrated, fake_keychain):
+    from claude_sync import manifest
+
+    file = paths.profile_dir("perso") / manifest.MANIFEST_FILE
+    file.write_text(
+        file.read_text()
+        + '\n[[mcp]]\nname = "remote"\ntransport = "http"\nurl = "https://example.test/mcp"\n'
+        + '[mcp.headers]\nAuthorization = "keychain:svc-x"\n'
+    )
+    code, _, _ = run(capsys, "uninstall", "--yes")
+    assert code == 0
+    argv = [e["argv"] for e in migrated.fake_claude.log(migrated.root)]
+    assert not [a for a in argv if a[0] == "mcp"]
+    assert fake_keychain.calls() == []

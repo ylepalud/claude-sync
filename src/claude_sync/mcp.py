@@ -171,6 +171,9 @@ class McpAction:
     shown: str
     """The command line with every `env` and `headers` value as `***`, for dry
     runs, confirmations and the error of a failing command."""
+    secrets: tuple[str, ...] = field(default=(), repr=False)
+    """The resolved `env` and `headers` values in `args`, so that the output of a
+    failing command can be scrubbed of them (left out of the repr)."""
 
 
 def _masked(entry: dict) -> dict:
@@ -182,7 +185,8 @@ def _add(name: str, entry: dict, confirm: bool = False) -> McpAction:
         return ("mcp", "add-json", name, json.dumps(json_entry), "--scope", "user")
 
     shown = "claude " + shlex.join(args(_masked(entry)))
-    return McpAction(f"run: {shown}", confirm, args(entry), shown)
+    values = tuple(v for table in _TABLES if table in entry for v in entry[table].values())
+    return McpAction(f"run: {shown}", confirm, args(entry), shown, values)
 
 
 def _remove(name: str, kind: str, confirm: bool) -> McpAction:

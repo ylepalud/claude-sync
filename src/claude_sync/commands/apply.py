@@ -15,7 +15,7 @@ def configure(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--prune",
         action="store_true",
-        help="also remove the plugins, marketplaces and skill links the manifest does not list",
+        help="also remove the plugins, marketplaces, skill links and MCP servers it does not list",
     )
 
 
@@ -60,6 +60,19 @@ COMMAND = Command(
         "stops apply with exit 1 before any change. A skill whose directory has\n"
         "another tree than recorded is reported like a moved plugin (exit 4).\n"
         "\n"
+        "User-scope MCP servers are converged after the skills, through claude mcp\n"
+        "add-json --scope user. env: references are written as ${NAME} and keychain:\n"
+        "references are read from the macOS Keychain; a reference that does not\n"
+        "resolve stops apply with exit 1 before any change. A server that differs is\n"
+        "removed then added again; for an http or sse server this drops its OAuth\n"
+        "sign-in, so it needs the confirmation (a stdio server does not). With\n"
+        "--prune, unlisted servers are removed after a confirmation; servers with\n"
+        "fields claude-sync does not model are never replaced or removed. Every\n"
+        "command shown (dry run, confirmation, error) masks env and headers values\n"
+        "as ***, and the output of a failing command is scrubbed of them. A failing\n"
+        "add after a remove leaves the server absent: run apply\n"
+        "again.\n"
+        "\n"
         "The profile is --profile NAME, else the profile of the current directory;\n"
         "its directory must exist (claude-sync profile create NAME)."
     ),
@@ -70,6 +83,10 @@ COMMAND = Command(
             "print the claude and git commands and skill links, run none",
         ),
         ("claude-sync apply --profile work --prune", "also unlink skills the manifest dropped"),
+        (
+            "claude-sync apply --profile work --dry-run",
+            "print the planned MCP commands with their secret values masked",
+        ),
         ("claude-sync apply --profile work --prune --yes", "also remove unlisted items, no prompt"),
     ],
     exit_codes=[

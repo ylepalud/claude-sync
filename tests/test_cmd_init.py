@@ -546,3 +546,18 @@ def test_init_declares_the_skills_but_leaves_their_links_and_clones_nothing(
         legacy.home / ".agents" / "skills" / "out"
     )
     assert not (paths.config_home() / "sources").exists()
+
+
+def test_init_converges_without_mcp_servers(
+    capsys, monkeypatch, legacy, fake_system, reset_on_cache_removal
+):
+    seen = []
+    real = converge.converge
+
+    def spy(*args, **kwargs):
+        seen.append(kwargs)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(converge, "converge", spy)
+    assert run(capsys, "init", "--yes")[0] == 0
+    assert [(k["skills"], k["mcp"]) for k in seen] == [(False, False)]
