@@ -29,6 +29,7 @@ COMMAND_MODULES = (
     "init",
     "uninstall",
     "adopt",
+    "doctor",
 )
 
 

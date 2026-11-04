@@ -2,11 +2,12 @@ import json
 import os
 import re
 import tarfile
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from claude_sync import migration, paths, system
+from claude_sync import manifest, migration, paths, system
 from claude_sync.cli import main
 from claude_sync.commands import uninstall
 from claude_sync.context import Context
@@ -657,3 +658,15 @@ def test_uninstall_leaves_mcp_servers_alone(capsys, migrated, fake_keychain):
     assert argv and not [a for a in argv if a[0] == "mcp"]
     assert json.loads((migrated.root.parent / ".claude.json").read_text())["mcpServers"] == servers
     assert fake_keychain.calls() == []
+
+
+def test_a_missing_tool_does_not_stop_uninstall(capsys, migrated):
+    file = paths.profile_dir("perso") / manifest.MANIFEST_FILE
+    declared = manifest.load(file)
+    manifest.save(
+        file,
+        replace(declared, tools=(manifest.Tool("fakejq", version="9.9"),)),
+    )
+    code, _, err = run(capsys, "uninstall", "--yes")
+    assert (code, err) == (0, "")
+    assert (migrated.home / ".claude").is_dir()

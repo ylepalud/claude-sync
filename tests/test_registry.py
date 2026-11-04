@@ -32,7 +32,9 @@ def test_every_command_documents_itself(command):
 @pytest.mark.parametrize("command", registry.COMMANDS, ids=lambda c: c.name)
 def test_flags_follow_the_kind(command):
     found = flags(subparser(command.name))
-    assert ("--json" in found) == (command.kind == "read")
+    if command.kind == "read":
+        assert "--json" in found
+    # a mutating command may add --json itself (doctor reports before and after a fix)
     assert ({"--dry-run", "--yes"} <= found) == (command.kind == "mutate")
 
 

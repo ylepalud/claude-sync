@@ -12,6 +12,7 @@ from claude_sync.manifest import (
     Plugin,
     Skill,
     SkillSource,
+    Tool,
 )
 
 COMMIT = "0123456789abcdef0123456789abcdef01234567"
@@ -450,3 +451,95 @@ def test_empty_keys_are_named_per_table(tmp_path):
         text = STDIO.replace("command", "command") if word == "env" else HTTP
         with pytest.raises(manifest.ManifestError, match=f"empty {word} key"):
             manifest.load(write(tmp_path, text + body))
+
+
+def with_tools() -> Manifest:
+    return Manifest(
+        (),
+        (),
+        None,
+        tools=(
+            Tool("gh", None, None, "brew:gh"),
+            Tool("openspec", "1.12.0", None, "npm:@fission-ai/openspec"),
+            Tool("rtk", "0.8", "rtk --version", "script:echo hi"),
+        ),
+    )
+
+
+def test_tools_round_trip(tmp_path):
+    file = tmp_path / manifest.MANIFEST_FILE
+    manifest.save(file, with_tools())
+    assert manifest.load(file) == with_tools()
+
+
+def test_render_puts_tools_after_mcp_servers_sorted_by_name():
+    text = manifest.render(
+        Manifest(
+            (),
+            (),
+            None,
+            mcp=(McpServer("m", "http", url="https://x"),),
+            tools=(Tool("zz", None, None, None), Tool("aa", "1", None, None)),
+        )
+    )
+    assert text.index("[[mcp]]") < text.index('name = "aa"') < text.index('name = "zz"')
+    assert text.count("[[tool]]") == 2
+    assert "check" not in text and "install" not in text
+
+
+def test_manifest_without_tool_tables_is_unchanged(tmp_path):
+    loaded = manifest.load(write(tmp_path, ""))
+    assert loaded.tools == ()
+    assert "[[tool]]" not in manifest.render(full())
+
+
+def test_minimal_tool_loads_with_defaults(tmp_path):
+    loaded = manifest.load(write(tmp_path, '[[tool]]\nname = "jq"\n'))
+    assert loaded.tools == (Tool("jq", None, None, None),)
+
+
+def test_scoped_npm_package_is_accepted(tmp_path):
+    loaded = manifest.load(write(tmp_path, '[[tool]]\nname = "x"\ninstall = "npm:@scope/pkg"\n'))
+    assert loaded.tools[0].install == "npm:@scope/pkg"
+
+
+@pytest.mark.parametrize(
+    ("body", "problem"),
+    [
+        ('name = "bad name"\n', "invalid tool name"),
+        ('name = ""\n', "tool name"),
+        ('name = "a"\n[[tool]]\nname = "a"\n', "duplicate tool 'a'"),
+        ('name = "a"\nversion = "x.y"\n', "version of 'a'"),
+        ('name = "a"\nversion = "1"\n', "version of 'a'"),
+        ('name = "a"\nversion = 2\n', "version of 'a'"),
+        ('name = "a"\nversion = "1.2abc"\n', "version of 'a'"),
+        ('name = "a"\nversion = "\\u0661.\\u0662"\n', "version of 'a'"),
+        ('name = "a"\ninstall = "apt:jq"\n', "brew:, npm:, uv:, cargo: or script:"),
+        ('name = "a"\ninstall = "jq"\n', "brew:, npm:, uv:, cargo: or script:"),
+        ('name = "a"\ninstall = "brew:"\n', "empty"),
+        ('name = "a"\ninstall = "script:"\n', "empty"),
+        ('name = "a"\ninstall = "brew:two words"\n', "invalid"),
+        ('name = "a"\ncheck = "b --version"\n', "first word"),
+        ('name = "a"\ncheck = ""\n', "check of 'a'"),
+        ('name = "a"\ncheck = "   "\n', "first word"),
+        ('name = "a"\ninstall = "script: "\n', "empty"),
+        ('name = "a"\ninstall = "script:echo\\u007f"\n', "control character"),
+        ('name = "a"\ninstall = "script:echo\\rx"\n', "control character"),
+        ('name = "a"\ncheck = "a \'unclosed"\n', "check of 'a'"),
+        ('name = "a"\ninstall = "script:echo\\nrm x"\n', "single line"),
+        ('name = "a"\ninstall = "script:echo\\u0007"\n', "control character"),
+        ('name = "a"\ninstall = "brew:--force"\n', "invalid package"),
+        ('name = "a"\nextra = 1\n', "unknown key 'extra'"),
+    ],
+)
+def test_invalid_tool_tables_name_file_and_problem(tmp_path, body, problem):
+    file = write(tmp_path, f"[[tool]]\n{body}")
+    with pytest.raises(manifest.ManifestError) as error:
+        manifest.load(file)
+    assert str(file) in str(error.value)
+    assert problem in str(error.value)
+
+
+def test_tool_check_whose_first_word_is_the_name_is_accepted(tmp_path):
+    loaded = manifest.load(write(tmp_path, '[[tool]]\nname = "a"\ncheck = "a -V --short"\n'))
+    assert loaded.tools[0].check == "a -V --short"

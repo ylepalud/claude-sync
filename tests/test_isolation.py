@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -123,3 +124,71 @@ def test_fake_keychain_replaces_the_guard(fake_keychain):
     assert missing.returncode == 44
     assert "could not be found in the keychain" in missing.stderr
     assert fake_keychain.calls()[0] == ["find-generic-password", "-s", "svc", "-w"]
+
+
+def test_real_package_managers_are_blocked():
+    for program in ("brew", "npm", "uv", "cargo"):
+        result = subprocess.run([program, "--version"], capture_output=True, text=True)
+        assert result.returncode == 2, program
+        assert f"real {program} blocked in tests" in result.stderr
+
+
+def run(*argv):
+    return subprocess.run(list(argv), capture_output=True, text=True)
+
+
+def test_fake_tool_prints_its_configured_output_and_is_absent_otherwise(fake_tools):
+    assert shutil.which("fakejq") is None
+    fake_tools.install("fakejq", "jq-1.6")
+    result = run("fakejq", "--version")
+    assert (result.returncode, result.stdout) == (0, "jq-1.6\n")
+    fake_tools.install("faketool", "faketool 2.0.1", exit=3)
+    assert run("faketool").returncode == 3
+    assert fake_tools.path("faketool") == shutil.which("faketool")
+    fake_tools.remove("fakejq")
+    assert shutil.which("fakejq") is None
+
+
+def test_fake_tool_exits_127_when_its_entry_is_gone(fake_tools):
+    fake_tools.install("fakejq", "jq-1.6")
+    fake_tools.forget("fakejq")
+    result = run("fakejq", "--version")
+    assert result.returncode == 127
+    assert "not found" in result.stderr
+
+
+def test_fake_managers_replace_the_guard_and_install_tools(fake_managers, fake_tools):
+    fake_managers.provides("brew", "jq", tool="fakejq", output="jq-1.7.1")
+    assert run("brew", "list", "jq").returncode == 1
+    assert shutil.which("fakejq") is None
+    result = run("brew", "install", "jq")
+    assert result.returncode == 0, result.stderr
+    assert run("fakejq", "--version").stdout == "jq-1.7.1\n"
+    assert run("brew", "list", "jq").returncode == 0
+    assert fake_managers.calls() == [
+        ["brew", "list", "jq"],
+        ["brew", "install", "jq"],
+        ["brew", "list", "jq"],
+    ]
+
+
+def test_fake_managers_cover_npm_uv_and_cargo(fake_managers, fake_tools):
+    fake_managers.provides("npm", "@scope/pkg", tool="faketool", output="faketool 1.0.0")
+    fake_managers.provides("uv", "uvpkg", tool="fakeuv", output="fakeuv 2.0")
+    fake_managers.provides("cargo", "crate", tool="fakecargo", output="fakecargo 3.0")
+    assert run("npm", "install", "-g", "@scope/pkg@latest").returncode == 0
+    assert run("uv", "tool", "install", "--upgrade", "uvpkg").returncode == 0
+    assert run("cargo", "install", "--force", "crate").returncode == 0
+    assert run("faketool").stdout == "faketool 1.0.0\n"
+    assert run("fakeuv").stdout == "fakeuv 2.0\n"
+    assert run("fakecargo").stdout == "fakecargo 3.0\n"
+
+
+def test_fake_managers_fail_on_unknown_packages_and_forced_failures(fake_managers):
+    unknown = run("cargo", "install", "--force", "nothing")
+    assert unknown.returncode == 1 and "no such package" in unknown.stderr
+    fake_managers.provides("brew", "jq", tool="fakejq", output="jq-1")
+    fake_managers.fail("brew", "jq")
+    broken = run("brew", "install", "jq")
+    assert broken.returncode == 1 and "forced failure" in broken.stderr
+    assert shutil.which("fakejq") is None

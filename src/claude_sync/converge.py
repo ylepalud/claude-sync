@@ -161,8 +161,9 @@ def build_manifest(
     user-scope MCP servers of `config_dir`.
 
     `previous` is the manifest being replaced, if any: the skill import keeps
-    its refs and trees (`skills.import_skills`) and the MCP import its
-    references (`mcp.import_servers`). The MCP servers are read in the
+    its refs and trees (`skills.import_skills`), the MCP import its
+    references (`mcp.import_servers`), and its `[[tool]]` tables are carried
+    over (tools cannot be observed). The MCP servers are read in the
     `.claude.json` of `state_dir_of(config_dir)`. The
     environment variables to export for the references the import made are
     listed on stderr (names only).
@@ -201,4 +202,12 @@ def build_manifest(
             + "\n".join(f"  {name}" for name in exports),
             file=sys.stderr,
         )
-    return manifest.Manifest(tuple(markets), tuple(plugins), account, sources, linked, servers)
+    return manifest.Manifest(
+        tuple(markets),
+        tuple(plugins),
+        account,
+        sources,
+        linked,
+        servers,
+        previous.tools if previous else (),
+    )

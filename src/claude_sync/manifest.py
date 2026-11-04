@@ -1,6 +1,7 @@
 """The profile manifest: the plugins and marketplaces a profile declares."""
 
 import re
+import shlex
 import tomllib
 import uuid
 from dataclasses import dataclass
@@ -18,6 +19,9 @@ _COMMIT = re.compile(r"[0-9a-f]{40}")
 _GITHUB = re.compile(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+")
 _ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _KEYCHAIN = re.compile(r"[^/]+(/[^/]+)?")
+_DOTTED = re.compile(r"[0-9]+(\.[0-9]+)+")
+_PACKAGE = re.compile(r"[A-Za-z0-9@][A-Za-z0-9@._/+-]*")
+RECIPE_KINDS = ("brew", "npm", "uv", "cargo", "script")
 
 
 class ManifestError(ClaudeSyncError):
@@ -73,6 +77,16 @@ class McpServer:
 
 
 @dataclass(frozen=True)
+class Tool:
+    """A command-line tool a profile needs: `version` is a minimum, `install` a recipe."""
+
+    name: str
+    version: str | None = None
+    check: str | None = None
+    install: str | None = None
+
+
+@dataclass(frozen=True)
 class Manifest:
     marketplaces: tuple[Marketplace, ...]
     plugins: tuple[Plugin, ...]
@@ -80,6 +94,7 @@ class Manifest:
     skill_sources: tuple[SkillSource, ...] = ()
     skills: tuple[Skill, ...] = ()
     mcp: tuple[McpServer, ...] = ()
+    tools: tuple[Tool, ...] = ()
 
 
 def load(path: Path) -> Manifest:
@@ -113,7 +128,15 @@ def _parse(data: dict, file: Path) -> Manifest:
     def fail(problem: str) -> ManifestError:
         return ManifestError(f"{file}: {problem}")
 
-    unknown = set(data) - {"marketplace", "plugin", "account", "skill_source", "skill", "mcp"}
+    unknown = set(data) - {
+        "marketplace",
+        "plugin",
+        "account",
+        "skill_source",
+        "skill",
+        "mcp",
+        "tool",
+    }
     if unknown:
         raise fail(f"unknown key {sorted(unknown)[0]!r}")
 
@@ -172,6 +195,16 @@ def _parse(data: dict, file: Path) -> Manifest:
         server_names.add(server.name)
         servers.append(server)
 
+    tools = []
+    tool_names: set[str] = set()
+    for table in _tables(data, "tool", fail):
+        _check_keys(table, {"name"}, {"version", "check", "install"}, "a tool", fail)
+        tool = _tool(table, fail)
+        if tool.name in tool_names:
+            raise fail(f"duplicate tool {tool.name!r}")
+        tool_names.add(tool.name)
+        tools.append(tool)
+
     account = None
     if "account" in data:
         table = data["account"]
@@ -180,7 +213,13 @@ def _parse(data: dict, file: Path) -> Manifest:
         _check_keys(table, {"org_uuid"}, set(), "account", fail)
         account = Account(_uuid(table["org_uuid"], fail))
     return Manifest(
-        tuple(marketplaces), tuple(plugins), account, tuple(sources), tuple(skills), tuple(servers)
+        tuple(marketplaces),
+        tuple(plugins),
+        account,
+        tuple(sources),
+        tuple(skills),
+        tuple(servers),
+        tuple(tools),
     )
 
 
@@ -323,6 +362,46 @@ def _mcp(table: dict, fail) -> McpServer:
     )
 
 
+def _tool(table: dict, fail) -> Tool:
+    name = _string(table["name"], "tool name", fail)
+    if not _NAME.fullmatch(name):
+        raise fail(f"invalid tool name {name!r}")
+    version = table.get("version")
+    if "version" in table:
+        version = _string(version, f"version of {name!r}", fail)
+        if not _DOTTED.fullmatch(version):
+            raise fail(f"version of {name!r} must be dotted numbers such as 1.2 ({version!r})")
+    check = table.get("check")
+    if "check" in table:
+        check = _string(check, f"check of {name!r}", fail)
+        try:
+            words = shlex.split(check)
+        except ValueError as error:
+            raise fail(f"check of {name!r} is not a valid command line: {error}") from error
+        if not words or words[0] != name:
+            raise fail(f"the first word of the check of {name!r} must be {name!r}")
+    install = table.get("install")
+    if "install" in table:
+        install = _recipe(_string(install, f"install of {name!r}", fail), name, fail)
+    return Tool(name, version, check, install)
+
+
+def _recipe(recipe: str, name: str, fail) -> str:
+    kind, _, rest = recipe.partition(":")
+    if kind not in RECIPE_KINDS:
+        raise fail(f"invalid install {recipe!r} for {name!r} (brew:, npm:, uv:, cargo: or script:)")
+    if not rest.strip():
+        raise fail(f"install of {name!r} has an empty {kind}: recipe")
+    if kind != "script":
+        if not _PACKAGE.fullmatch(rest):
+            raise fail(f"invalid package {rest!r} in the install of {name!r}")
+    elif "\n" in rest:
+        raise fail(f"the script of {name!r} must be a single line")
+    elif any(ord(c) < 32 or ord(c) == 127 for c in rest):
+        raise fail(f"the script of {name!r} must not contain a control character")
+    return recipe
+
+
 def _plugin(table: dict, fail) -> Plugin:
     id_ = _string(table["id"], "plugin id", fail)
     plugin, at, market = id_.rpartition("@")
@@ -401,6 +480,12 @@ def render(manifest: Manifest) -> str:
             if mapping:
                 lines.append(f"[mcp.{key}]")
                 lines += [f"{toml_string(k)} = {toml_string(v)}" for k, v in mapping.items()]
+        blocks.append("\n".join(lines))
+    for tool in sorted(manifest.tools, key=lambda t: t.name):
+        lines = ["[[tool]]", f"name = {toml_string(tool.name)}"]
+        for key in ("version", "check", "install"):
+            if getattr(tool, key) is not None:
+                lines.append(f"{key} = {toml_string(getattr(tool, key))}")
         blocks.append("\n".join(lines))
     if manifest.account is not None:
         blocks.append(f"[account]\norg_uuid = {toml_string(manifest.account.org_uuid)}")

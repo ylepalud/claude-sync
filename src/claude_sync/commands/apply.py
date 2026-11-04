@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import argparse
 
-from claude_sync import converge, target
+from claude_sync import converge, manifest, target, tools
 from claude_sync.context import Context
+from claude_sync.errors import ClaudeSyncError
 from claude_sync.exit_codes import ExitCode
 from claude_sync.registry import Command
 
@@ -25,6 +26,23 @@ _question = converge.question
 
 def run(args: argparse.Namespace, ctx: Context) -> int:
     profile = target.resolve_target(args.profile)
+    declared = manifest.load(profile.directory / manifest.MANIFEST_FILE)
+    failures = [
+        f"  {status.name}: {status.status}"
+        + (
+            f" (installed {status.installed or 'unreadable'}, required {status.required})"
+            if status.status == "too-old"
+            else ""
+        )
+        for status in (tools.check(tool) for tool in declared.tools)
+        if status.status != "ok"
+    ]
+    if failures:
+        raise ClaudeSyncError(
+            f"profile {profile.name!r} needs tools that are not ok:\n"
+            + "\n".join(failures)
+            + "\nrun `claude-sync doctor --fix` to install or upgrade them"
+        )
     return converge.converge(profile.directory, ctx, args.prune)
 
 
@@ -72,6 +90,11 @@ COMMAND = Command(
         "as ***, and the output of a failing command is scrubbed of them. A failing\n"
         "add after a remove leaves the server absent: run apply\n"
         "again.\n"
+        "\n"
+        "Before any action, apply checks the tools the profile declares ([[tool]])\n"
+        "and refuses with exit 1, naming each missing or too old one, when a tool\n"
+        "is not ok; claude-sync doctor --fix installs or upgrades them. This\n"
+        "check applies to apply only, not to init or uninstall.\n"
         "\n"
         "The profile is --profile NAME, else the profile of the current directory;\n"
         "its directory must exist (claude-sync profile create NAME)."
