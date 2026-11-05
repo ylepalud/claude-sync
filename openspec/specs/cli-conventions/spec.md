@@ -27,8 +27,11 @@ help of every command in one output, in a stable order.
 ### Requirement: Documented exit codes
 Commands SHALL use these exit codes: 0 success, 1 runtime error, 2 usage
 error, 3 confirmation required but not given, 4 drift detected (state differs
-from what is declared). Errors SHALL be written to standard error, prefixed
-with `claude-sync: error:`.
+from what is declared). Commands that can be interrupted part way (`init`,
+`uninstall`) SHALL exit with 130 on an interrupt (Ctrl-C), after printing
+how to recover. Errors SHALL be written to standard error, prefixed with
+`claude-sync: error:`. When the reader of standard output closes it early,
+the command SHALL end quietly with exit code 1.
 
 #### Scenario: No command
 - **WHEN** the user runs `claude-sync` with no argument

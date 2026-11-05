@@ -79,7 +79,9 @@ have a `tree`, it SHALL check out the newest commit of the ref where every
 declared skill's directory has its recorded tree, or, if no commit matches
 all, the newest commit matching the most of them, reporting the others as
 changed since install (exit 4, accepted with `claude-sync import`); without
-commit or trees it stays on the ref's head. It SHALL then create missing skill links as absolute
+commit or trees, a fresh clone is at the head of its ref, an existing clone
+on its ref stays where it is, and an existing clone off its declared ref is
+checked out at that ref's head. It SHALL then create missing skill links as absolute
 links to `sources/<name>/<path>`, and replace a link pointing elsewhere only
 after a confirmation. It SHALL never replace a real directory or file in
 `skills/`; such a conflict stops apply with exit code 1, naming it. With

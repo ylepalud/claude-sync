@@ -8,7 +8,8 @@ and install or upgrade them on request.
 
 ### Requirement: Tool tables
 The profile manifest SHALL accept zero or more `[[tool]]` tables with a
-unique `name` (letters, digits, `.`, `_`, `-`), an optional `version` (a
+unique `name` (letters, digits, `.`, `_`, `-`, starting with a letter or a
+digit), an optional `version` (a
 minimum, dotted numbers), an optional `check` (a command line whose first
 word is the tool's name; default `<name> --version`) and an optional
 `install` recipe: `brew:<formula>`, `npm:<package>`, `uv:<package>`,

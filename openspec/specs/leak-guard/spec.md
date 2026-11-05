@@ -34,8 +34,11 @@ A finding SHALL name the location and the 1-based index of the matching term
 in the denylist, and SHALL NOT print the term, the matching line, or any path
 that contains a term, so that public CI logs never disclose the denylist.
 Locations are `<path>:<line>` for file content, `path #<k>` (1-based position
-in the scanned path list) when the path itself matches, `<short commit sha>`
-followed by `:<line>` or `message` or `path` for history, `message` for a
+in the scanned path list) when the path itself matches, for history
+`<short sha>:<path>:<line>` for an added line (the path replaced by
+`path #<k>` when it matches), `<short sha>: path #<k>` for a matching path,
+`<short sha>: message` for a commit message, `<short sha>: identity` for an
+author or committer, and `ref #<k>` or `ref #<k>: tag message` for refs, `message` for a
 message file, and the caller's label for free text. Error messages SHALL never
 echo file content or git output.
 

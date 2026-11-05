@@ -11,7 +11,8 @@ profile and back, safely and reversibly, and bring back what tools write to
 `init`, `uninstall` and `adopt` SHALL refuse with exit code 1, changing
 nothing, while a Claude Code CLI process (`claude`) or the Claude desktop app
 (`Claude`) runs, listing them. `init` SHALL also refuse when `~/.claude` is
-missing or is a symbolic link, when the default profile directory already
+missing or is a symbolic link, when `~/.claude.json` is missing (Claude
+Code has never started), when the default profile directory already
 exists, when `~/.claude/.claude.json` exists, when `~/.claude` and the
 profiles root (or its nearest existing parent) are on different file
 systems, when the free space is smaller than the configuration size, or when
@@ -40,13 +41,19 @@ member names) under `backups/` (mode 700) next to the configuration file and
 verify it can be listed; produce the manifest of `~/.claude` (running the `claude` CLI with
 `CLAUDE_CONFIG_DIR` unset, so it reads `~/.claude.json` where it is and
 never creates `~/.claude/.claude.json`); rename
-`~/.claude` to the default profile directory and `~/.claude.json` into it as
-`.claude.json`; write the migration record `.claude-sync-migration.json` in
-the profile (untracked) and update it after each later step; recreate every
+`~/.claude` to the default profile directory; write the migration record
+`.claude-sync-migration.json` in the profile (untracked), and update it
+after each later step; rename `~/.claude.json` into the profile as
+`.claude.json`; recreate every
 relative symbolic link whose target lies outside `~/.claude` as an absolute
 link to that target (links pointing inside stay relative; `.git` skipped);
-replace the old `~/.claude` path in the string values of the profile's
-`settings.json` where it is followed by `/` or ends the value; when the
+replace the old `~/.claude` path, written absolute or as `~/.claude`,
+`$HOME/.claude` or `${HOME}/.claude`, in the string values of the profile's
+`settings.json` wherever it is not preceded by a path character (letter,
+digit, `_`, `/`, `.`, `~`, `-`) and not followed by a name character
+(letter, digit, `_`, `.`, `-`), keeping the notation it was written in
+when the profile lies under the home directory (else writing the absolute
+path); when the
 profile's `.gitignore` ignores `profile.toml`, append `!/profile.toml`; add
 a marked block evaluating the shell snippet to `~/.zshrc` unless present;
 write and load a LaunchAgent that sets `CLAUDE_CONFIG_DIR` to the profile
@@ -58,7 +65,9 @@ user to sign in again with `/login` in each profile. A failure SHALL stop
 with exit code 1 and print the recovery for that point: before the first
 rename nothing changed; between or after the renames, `claude-sync uninstall`
 (which works from the record); a failure of the final apply is a warning
-with `run claude-sync apply`, and init exits 4.
+with `run claude-sync apply`, and init exits 4. An interrupt (Ctrl-C) is
+handled like a failure at that point and exits with code 130. The printed
+plan SHALL list the steps in the order they run.
 
 #### Scenario: Dry run
 - **WHEN** the user runs `claude-sync init --dry-run`
