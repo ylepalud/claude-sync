@@ -578,3 +578,13 @@ def test_a_missing_tool_does_not_stop_init(capsys, legacy, fake_system, reset_on
     code, _, _ = run(capsys, "init", "--yes")
     assert code == 0
     assert not os.path.lexists(legacy.home / ".claude")
+
+
+def test_the_printed_plan_follows_the_execution_order(capsys, legacy_claude):
+    code = main(["init", "--dry-run"])
+    out = capsys.readouterr().out
+    assert code == 0
+    record = out.index(".claude-sync-migration.json")
+    first_rename = out.index("rename ~/.claude to")
+    json_rename = out.index("rename ~/.claude.json to")
+    assert first_rename < record < json_rename
