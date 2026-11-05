@@ -55,7 +55,11 @@ own top level, not inside another repository) and the source is not
 `path:`, the current commit is recorded as `commit`. A `path:` source under
 the home directory is written with `~`. Marketplaces whose source is a file
 or claude.ai are skipped with a warning on standard error. `--source DIR`
-reads the configuration in `DIR` instead of a profile. The result goes to
+reads the configuration in `DIR` instead of a profile; when `DIR` is the
+default `~/.claude`, the `claude` CLI SHALL run with `CLAUDE_CONFIG_DIR`
+unset (it writes `<CLAUDE_CONFIG_DIR>/.claude.json` when it starts, and a
+`~/.claude/.claude.json` would make `init` refuse), and the MCP servers are
+read from `~/.claude.json`. The result goes to
 `--output FILE`, to standard output with `--output -`, or to the target
 profile's `profile.toml`, which SHALL only be written when the profile
 directory exists. An existing `[account]` table in that file SHALL be kept.

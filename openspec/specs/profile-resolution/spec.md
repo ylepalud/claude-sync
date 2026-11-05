@@ -54,7 +54,10 @@ the current directory). With `--json` it SHALL print `profile`, `source`
 (`override`, `match` or `default`), `match` (the matching configured path or
 null), `config_dir` (the profile directory) and `initialized` (whether that
 directory exists). When `CLAUDE_SYNC_OVERRIDE` is set to a valid profile name
-it wins, with source `override`.
+it wins, with source `override`; when it is set to an invalid name, `which`
+(and every command resolving the profile from the current directory) SHALL
+fail with exit code 1 naming the variable, while the shell snippet ignores
+it with a warning.
 
 #### Scenario: JSON output
 - **WHEN** the user runs `claude-sync which ~/Dev/work/api --json` with `~/Dev/work` mapped to `work` and no `work` profile directory

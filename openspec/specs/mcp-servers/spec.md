@@ -10,8 +10,10 @@ versioned files, and converge the profile to that declaration through the
 ### Requirement: MCP tables
 The profile manifest SHALL accept zero or more `[[mcp]]` tables with a
 unique `name`, a `transport` (`stdio`, `http` or `sse`), for `stdio` a
-`command` and an optional `args` list, for `http` and `sse` a `url`, and
-optional `env` and `headers` tables (headers only for `http` and `sse`).
+`command`, an optional `args` list and an optional `env` table, and for
+`http` and `sse` a `url` and an optional `headers` table; `command`, `args`
+and `env` SHALL be refused on `http` and `sse` servers, and `url` and
+`headers` on `stdio` servers.
 Every `env` and `headers` value SHALL be `env:<NAME>` (an environment
 variable name), `keychain:<service>` or `keychain:<service>/<account>`, or
 `value:<text>` (an explicit non-secret literal, which MAY contain `${NAME}`
