@@ -187,4 +187,4 @@ time with `importlib.metadata`, and users install from the default
 branch with `uv tool install git+https://github.com/ylepalud/claude-sync`.
 `claude-sync --version` therefore changes only when `version` in
 `pyproject.toml` changes; users pick up new commits with
-`uv tool install --force` (see [Installation](installation.md#upgrade)).
+`uv tool install --force --reinstall` (see [Installation](installation.md#upgrade)).
