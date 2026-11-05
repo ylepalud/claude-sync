@@ -7,5 +7,7 @@ if ! command -v uv >/dev/null 2>&1; then
   exit 1
 fi
 
-uv tool install --force "${CLAUDE_SYNC_SOURCE:-git+https://github.com/ylepalud/claude-sync}"
+# --reinstall: the version rarely changes, and uv would reuse a wheel it
+# already built for it, installing stale code from a local clone.
+uv tool install --force --reinstall "${CLAUDE_SYNC_SOURCE:-git+https://github.com/ylepalud/claude-sync}"
 claude-sync --version

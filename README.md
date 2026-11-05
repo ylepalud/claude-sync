@@ -30,7 +30,7 @@ claude-sync --version
 ```
 
 Or from a clone, with `install.sh` (it checks that `uv` is on `PATH`, runs
-`uv tool install --force` on `CLAUDE_SYNC_SOURCE`, which defaults to the
+`uv tool install --force --reinstall` on `CLAUDE_SYNC_SOURCE`, which defaults to the
 GitHub URL above, then prints `claude-sync --version`):
 
 ```sh
