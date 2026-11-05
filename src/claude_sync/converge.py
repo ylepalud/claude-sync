@@ -168,12 +168,17 @@ def build_manifest(
     environment variables to export for the references the import made are
     listed on stderr (names only).
 
-    `cli` runs the `claude` commands (default: `ClaudeCli(config_dir)`); init
-    passes `ClaudeCli(None)` to read `~/.claude` with CLAUDE_CONFIG_DIR unset.
+    `cli` runs the `claude` commands (default: `ClaudeCli(None)` for the default
+    `~/.claude`, so CLAUDE_CONFIG_DIR stays unset and the CLI never writes a
+    `~/.claude/.claude.json` that would make init refuse; else
+    `ClaudeCli(config_dir)`).
     A marketplace claude-sync cannot manage is skipped with a warning on stderr,
     and so are its plugins.
     """
-    observed = sync.observe(cli or ClaudeCli(config_dir), config_dir)
+    if cli is None:
+        default = state_dir_of(config_dir) != config_dir
+        cli = ClaudeCli(None if default else config_dir)
+    observed = sync.observe(cli, config_dir)
     markets = []
     for market in observed.marketplaces:
         if market.source is None:
