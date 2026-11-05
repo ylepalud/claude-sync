@@ -16,6 +16,9 @@ sources (step 5a), user-scope MCP servers (step 5b) and the command-line
 tools a profile needs, checked by `doctor` (step 5c), all exist. See
 `openspec/changes/` for any later work.
 
+Documentation: the full user and reference guide is in
+[doc/index.md](doc/index.md).
+
 ## Install
 
 Requires [uv](https://docs.astral.sh/uv/getting-started/installation/) and
@@ -372,8 +375,8 @@ plugins. `--dry-run` prints the `git` commands and link changes. A recorded
 - a real file or directory is at a declared skill's link path (move it
   away, or remove the skill from the manifest);
 - a clone in `sources/` has another `origin` than its declared source;
-- a clone with local changes would have to move to another commit (a dirty
-  clone already at its commit is only reported by `status`);
+- a clone of a declared source has local changes (even one already at its
+  commit: commit or discard them first);
 - another profile declares the same source name differently (see Shared
   clones).
 

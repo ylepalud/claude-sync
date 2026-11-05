@@ -146,3 +146,25 @@ def test_unexpected_exception_shows_the_traceback_in_debug_mode(capsys, monkeypa
     assert code == 1
     assert "Traceback" in err
     assert "claude-sync: error: internal error" in err
+
+
+def test_a_reader_closing_early_ends_quietly(tmp_path):
+    # `claude-sync help --all | head -1`: no "Exception ignored ... BrokenPipeError".
+    import subprocess
+    import sys
+
+    # Far more output than a pipe buffer holds, so the write really fails.
+    script = (
+        "import claude_sync.cli as cli; "
+        "cli.main = lambda: (print('x' * 400_000), 0)[1]; "
+        "cli.entry()"
+    )
+    proc = subprocess.Popen(
+        [sys.executable, "-c", script], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
+    proc.stdout.read(10)
+    proc.stdout.close()
+    err = proc.stderr.read().decode()
+    proc.wait()
+    assert "BrokenPipeError" not in err
+    assert proc.returncode == 1

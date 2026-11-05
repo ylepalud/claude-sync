@@ -487,3 +487,39 @@ def test_tools_survive_import(capsys, source, fake_claude):
     written = manifest.load(profile / manifest.MANIFEST_FILE)
     assert written.tools == tuple(sorted(tools, key=lambda t: t.name))
     assert [p.id for p in written.plugins] == ["fmt@tools", "lint@tools"]
+
+
+def test_source_default_claude_dir_runs_claude_without_config_dir(capsys, monkeypatch, fake_claude):
+    # The real CLI writes <CLAUDE_CONFIG_DIR>/.claude.json on start: pointing it at
+    # ~/.claude would create ~/.claude/.claude.json and make init refuse later.
+    from claude_sync import converge
+
+    default = Path.home() / ".claude"
+    fake_claude.seed(default, {"marketplaces": [], "plugins": []})
+    seen = []
+    real = converge.ClaudeCli
+
+    def spy(config_dir):
+        seen.append(config_dir)
+        return real(config_dir)
+
+    monkeypatch.setattr(converge, "ClaudeCli", spy)
+    code, _, _ = run(capsys, "import", "--source", str(default), "--output", "-")
+    assert code == 0
+    assert seen == [None]
+
+
+def test_source_other_dir_runs_claude_with_that_config_dir(capsys, monkeypatch, source):
+    from claude_sync import converge
+
+    directory, _ = source
+    seen = []
+    real = converge.ClaudeCli
+
+    def spy(config_dir):
+        seen.append(config_dir)
+        return real(config_dir)
+
+    monkeypatch.setattr(converge, "ClaudeCli", spy)
+    run(capsys, "import", "--source", str(directory), "--output", "-")
+    assert seen and all(c is not None for c in seen)
