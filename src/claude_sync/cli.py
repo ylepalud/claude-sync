@@ -67,4 +67,12 @@ def _report(error: ClaudeSyncError | str) -> None:
 
 
 def entry() -> None:
-    sys.exit(main())
+    try:
+        code = main()
+        sys.stdout.flush()
+    except BrokenPipeError:
+        # The reader closed early (`claude-sync help --all | head`): drop the rest
+        # quietly instead of letting Python report the flush failure at exit.
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        code = int(ExitCode.ERROR)
+    sys.exit(code)
